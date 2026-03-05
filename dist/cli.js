@@ -668,6 +668,60 @@ function summarizeToolResult(result) {
 }
 
 // src/agent.ts
+function parsePlannedSubtasksFromObject(parsed) {
+  const tasksRaw = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  if (tasksRaw.length === 0) {
+    return [];
+  }
+  const intermediate = tasksRaw.reduce((acc, item, index) => {
+    const record = item;
+    const label = String(record.label ?? "").trim();
+    const task = String(record.task ?? "").trim();
+    if (!task) {
+      return acc;
+    }
+    const scopeRaw = Array.isArray(record.scope) ? record.scope : [];
+    const dependsRaw = Array.isArray(record.depends_on) ? record.depends_on : [];
+    const scope = scopeRaw.map((part) => String(part ?? "").trim()).filter(Boolean).slice(0, 8);
+    const dependsOn = dependsRaw.map((part) => String(part ?? "").trim()).filter(Boolean).slice(0, 8);
+    acc.push({
+      label: label || `worker-task-${index + 1}`,
+      task,
+      scope,
+      depends_on: dependsOn
+    });
+    return acc;
+  }, []).slice(0, 8);
+  if (intermediate.length === 0) {
+    return [];
+  }
+  const labelCounts = /* @__PURE__ */ new Map();
+  const normalized = intermediate.map((item) => {
+    const seen = (labelCounts.get(item.label) ?? 0) + 1;
+    labelCounts.set(item.label, seen);
+    const label = seen === 1 ? item.label : `${item.label}-${seen}`;
+    return { ...item, label };
+  });
+  const allowedLabels = new Set(normalized.map((item) => item.label));
+  return normalized.map((item) => {
+    const depends = item.depends_on.filter((label) => label !== item.label && allowedLabels.has(label)).filter((label, index, arr) => arr.indexOf(label) === index).slice(0, 8);
+    const planned = {
+      label: item.label,
+      task: item.task
+    };
+    if (item.scope.length > 0) {
+      planned.scope = item.scope;
+    }
+    if (depends.length > 0) {
+      planned.depends_on = depends;
+    }
+    return planned;
+  });
+}
+function parsePlannedSubtasksText(text) {
+  const parsed = extractJsonObject(text);
+  return parsePlannedSubtasksFromObject(parsed);
+}
 function toToolCall(item) {
   return {
     name: String(item.name),
@@ -846,17 +900,10 @@ var GrokAgent = class _GrokAgent {
     const items = Array.isArray(response.data) ? response.data : [];
     return items.map((item) => ({ id: String(item?.id ?? "") })).filter((item) => item.id.length > 0).sort((a, b) => a.id.localeCompare(b.id));
   }
-  async planSubtasks(goal, state) {
+  async planSubtasks(goal, state, plannerModel) {
     const instructions = withUserSystemOverride(state.systemPromptOverride);
-    const response = await this.client.responses.create({
-      model: state.model,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `Break this engineering goal into 2-6 executable worker tasks.
+    const planningModel = plannerModel?.trim() || state.plannerModel?.trim() || state.model;
+    const basePrompt = `Break this engineering goal into 2-6 executable worker tasks.
 
 Goal:
 ${goal}
@@ -870,41 +917,44 @@ Rules:
 - test/verify tasks must depend_on implementation tasks
 - scope should be specific paths (files or directories)
 - depends_on values must reference labels from this same task list
-- do not include markdown`
-            }
-          ]
-        }
-      ],
-      instructions,
-      store: false
-    });
+- do not include markdown`;
+    const response = await this.createResponse(
+      {
+        model: planningModel,
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: basePrompt }]
+          }
+        ]
+      },
+      instructions
+    );
     const text = extractOutputText(response);
-    const parsed = extractJsonObject(text);
-    const tasksRaw = Array.isArray(parsed?.tasks) ? parsed?.tasks : [];
-    const tasks = tasksRaw.reduce((acc, item) => {
-      const record = item;
-      const label = String(record.label ?? "").trim();
-      const task = String(record.task ?? "").trim();
-      if (!task) {
-        return acc;
-      }
-      const scopeRaw = Array.isArray(record.scope) ? record.scope : [];
-      const dependsRaw = Array.isArray(record.depends_on) ? record.depends_on : [];
-      const scope = scopeRaw.map((part) => String(part ?? "").trim()).filter(Boolean).slice(0, 8);
-      const dependsOn = dependsRaw.map((part) => String(part ?? "").trim()).filter(Boolean).slice(0, 8);
-      const planned = {
-        label: label || "worker-task",
-        task
-      };
-      if (scope.length > 0) {
-        planned.scope = scope;
-      }
-      if (dependsOn.length > 0) {
-        planned.depends_on = dependsOn;
-      }
-      acc.push(planned);
-      return acc;
-    }, []).slice(0, 8);
+    let tasks = parsePlannedSubtasksText(text);
+    if (tasks.length > 0) {
+      return tasks;
+    }
+    const repairPrompt = `Rewrite the following planner draft into strict JSON with this exact shape:
+{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}
+
+Return JSON only. No markdown.
+
+Draft:
+${text || "(empty response)"}`;
+    const repaired = await this.createResponse(
+      {
+        model: planningModel,
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: repairPrompt }]
+          }
+        ]
+      },
+      instructions
+    );
+    tasks = parsePlannedSubtasksText(extractOutputText(repaired));
     if (tasks.length > 0) {
       return tasks;
     }
@@ -1222,14 +1272,22 @@ function normalizeScopePath(input) {
   if (!value) {
     return void 0;
   }
+  const hasTrailingSeparator = /[\\/]$/.test(value);
   let normalized = path3.normalize(value);
-  if (normalized.length > 1) {
-    normalized = normalized.replace(/[\\/]+$/, "");
-  }
+  normalized = normalized.replace(/[\\/]+$/, "");
   if (!normalized || normalized === ".") {
     return void 0;
   }
+  if (hasTrailingSeparator) {
+    return `${normalized}/`;
+  }
   return normalized;
+}
+function stripScopeSeparator(input) {
+  if (input.length <= 1) {
+    return input;
+  }
+  return input.replace(/[\\/]+$/, "");
 }
 function scopesOverlap(left, right) {
   if (!left?.length || !right?.length) {
@@ -1237,10 +1295,12 @@ function scopesOverlap(left, right) {
   }
   for (const a of left) {
     for (const b of right) {
-      if (a === b) {
+      const aPath = stripScopeSeparator(a);
+      const bPath = stripScopeSeparator(b);
+      if (aPath === bPath) {
         return true;
       }
-      if (a.startsWith(`${b}${path3.sep}`) || b.startsWith(`${a}${path3.sep}`)) {
+      if (aPath.startsWith(`${bPath}${path3.sep}`) || bPath.startsWith(`${aPath}${path3.sep}`)) {
         return true;
       }
     }
@@ -1255,19 +1315,31 @@ function isPathCoveredByScopes(filePath, scopes) {
   if (!normalizedFile) {
     return false;
   }
+  const filePathForMatch = stripScopeSeparator(normalizedFile);
   for (const scope of scopes) {
     const normalizedScope = normalizeScopePath(scope);
     if (!normalizedScope) {
       continue;
     }
-    if (normalizedFile === normalizedScope) {
+    const scopePath = stripScopeSeparator(normalizedScope);
+    if (filePathForMatch === scopePath) {
       return true;
     }
-    if (normalizedFile.startsWith(`${normalizedScope}${path3.sep}`)) {
+    if (filePathForMatch.startsWith(`${scopePath}${path3.sep}`)) {
       return true;
     }
   }
   return false;
+}
+function isDirectoryScope(scope) {
+  return scope.endsWith("/");
+}
+function runLikelyRequiresFileChanges(run2) {
+  const fileScoped = (run2.scope ?? []).filter((scope) => !isDirectoryScope(scope));
+  if (fileScoped.length === 0) {
+    return false;
+  }
+  return /\b(write|create|update|edit|modify|refactor|implement|add|remove|rename|patch)\b/i.test(run2.task);
 }
 var SNAPSHOT_EXCLUDES = /* @__PURE__ */ new Set([
   ".git",
@@ -1740,6 +1812,7 @@ var SubagentManager = class {
           "You are operating inside an isolated workspace snapshot.",
           "Do not install dependencies, run package managers, or create build artifacts unless explicitly required by the task.",
           run2.scope?.length ? `Allowed write scope: ${run2.scope.join(", ")}. Do not modify files outside this scope.` : void 0,
+          "If the task requests creating or editing files, you must actually make those file changes before finishing.",
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ].filter(Boolean).join("\n")
@@ -1768,9 +1841,14 @@ var SubagentManager = class {
       run2.output = result.text;
       run2.responseId = result.responseId;
       run2.lastActivityAt = Date.now();
-      const patch = await generateWorkerPatch(snapshot, this.toolContext);
+      let patch = await generateWorkerPatch(snapshot, this.toolContext);
       run2.patch = patch || void 0;
       run2.patchFiles = patch ? extractPatchFiles(patch) : [];
+      if (!patch && runLikelyRequiresFileChanges(run2)) {
+        throw new Error(
+          `task appears to require file edits but worker produced no changes (scope: ${run2.scope?.join(", ") ?? "(none)"})`
+        );
+      }
       run2.mergeStatus = patch ? "pending" : "skipped";
       run2.currentAction = patch ? "waiting to merge" : "completed";
       this.emit({ type: "completed", run: run2 });
@@ -2059,6 +2137,8 @@ function printHelp() {
   console.log("  /reset             Clear server-side conversation link for this local session");
   console.log("  /model             Show current model");
   console.log("  /model <name>      Change model for next turns");
+  console.log("  /planner           Show current planner model");
+  console.log("  /planner <name>    Change planner model used by /agents run");
   console.log("  /models            List available models from API");
   console.log("  /agents help       Show subagent commands");
   console.log("  /agents run <goal> Planner splits goal and spawns workers");
@@ -2235,6 +2315,21 @@ async function startRepl(options) {
       }
       continue;
     }
+    if (input === "/planner") {
+      console.log(`Current planner model: ${options.state.plannerModel ?? options.state.model}`);
+      console.log("Usage: /planner <name>");
+      continue;
+    }
+    if (input.startsWith("/planner ")) {
+      const model = input.replace("/planner", "").trim();
+      if (!model) {
+        console.log("Usage: /planner <name>");
+      } else {
+        options.state.plannerModel = model;
+        console.log(`Planner model set to ${model}`);
+      }
+      continue;
+    }
     if (input === "/models") {
       const spinner2 = new Spinner();
       try {
@@ -2340,8 +2435,9 @@ async function startRepl(options) {
         }
         const spinner2 = new Spinner();
         try {
-          spinner2.start("Planning worker tasks...");
-          const plan = await options.agent.planSubtasks(goal, options.state);
+          const plannerModel = options.state.plannerModel ?? options.state.model;
+          spinner2.start(`Planning worker tasks with ${plannerModel}...`);
+          const plan = await options.agent.planSubtasks(goal, options.state, plannerModel);
           spinner2.stop();
           const runs = options.subagents.spawnPlanned(plan);
           for (const run2 of runs) {
@@ -2554,6 +2650,7 @@ async function persistSession(sessionPath, sessionName, workspace, state, create
     name: sessionName,
     workspace,
     model: state.model,
+    plannerModel: state.plannerModel,
     previousResponseId: state.previousResponseId,
     createdAt
   });
@@ -2561,7 +2658,7 @@ async function persistSession(sessionPath, sessionName, workspace, state, create
 async function run() {
   printGrokingBanner();
   const program = new Command();
-  program.name("groking").description("Grok terminal coding assistant powered by xAI Responses API").argument("[prompt...]", "Prompt text for one-shot mode. Leave empty for interactive mode.").option("-m, --model <model>", "Grok model to use", process6.env.GROK_MODEL ?? "grok-code-fast-1").option("--base-url <url>", "API base URL", process6.env.XAI_BASE_URL ?? "https://api.x.ai/v1").option("--session <name>", "Session name (defaults to workspace hash)").option("--system <text>", "Additional system prompt").option("--system-file <path>", "Read additional system prompt from file").option("--cwd <path>", "Workspace root for tools", process6.cwd()).option("--no-tools", "Disable local tool access").option("-p, --prompt <text>", "One-shot prompt").option("--reset", "Reset and clear local session state before starting", false).option("--allow-outside-workspace", "Allow file/shell operations outside workspace", false).option("--timeout-ms <ms>", "Default shell command timeout in ms", (v) => Number(v), 12e4).option("--max-file-bytes <bytes>", "Max readable file size in bytes", (v) => Number(v), 2e6).option("--max-output-chars <chars>", "Max captured stdout/stderr chars", (v) => Number(v), 4e4).showHelpAfterError();
+  program.name("groking").description("Grok terminal coding assistant powered by xAI Responses API").argument("[prompt...]", "Prompt text for one-shot mode. Leave empty for interactive mode.").option("-m, --model <model>", "Grok model to use", process6.env.GROK_MODEL ?? "grok-code-fast-1").option("--planner-model <model>", "Planner model for /agents run (defaults to --model)", process6.env.GROK_PLANNER_MODEL).option("--base-url <url>", "API base URL", process6.env.XAI_BASE_URL ?? "https://api.x.ai/v1").option("--session <name>", "Session name (defaults to workspace hash)").option("--system <text>", "Additional system prompt").option("--system-file <path>", "Read additional system prompt from file").option("--cwd <path>", "Workspace root for tools", process6.cwd()).option("--no-tools", "Disable local tool access").option("-p, --prompt <text>", "One-shot prompt").option("--reset", "Reset and clear local session state before starting", false).option("--allow-outside-workspace", "Allow file/shell operations outside workspace", false).option("--timeout-ms <ms>", "Default shell command timeout in ms", (v) => Number(v), 12e4).option("--max-file-bytes <bytes>", "Max readable file size in bytes", (v) => Number(v), 2e6).option("--max-output-chars <chars>", "Max captured stdout/stderr chars", (v) => Number(v), 4e4).showHelpAfterError();
   program.parse(process6.argv);
   const promptArgs = program.args ?? [];
   const options = program.opts();
@@ -2576,6 +2673,7 @@ async function run() {
   const createdAt = existingSession?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString();
   const state = {
     model: options.model,
+    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim() || options.model,
     previousResponseId: existingSession?.workspace === workspace ? existingSession.previousResponseId : void 0,
     systemPromptOverride: await readSystemOverride(options),
     enableTools: options.tools
@@ -2685,6 +2783,7 @@ async function run() {
   }
   console.log(`Workspace: ${workspace}`);
   console.log(`Model: ${state.model}`);
+  console.log(`Planner model: ${state.plannerModel ?? state.model}`);
   console.log(`Session file: ${sessionPath}`);
   if (state.previousResponseId) {
     console.log("Loaded existing session context.");

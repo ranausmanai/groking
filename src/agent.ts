@@ -15,6 +15,7 @@ export interface AgentRunOptions {
 
 export interface AgentState {
   model: string;
+  plannerModel?: string;
   previousResponseId?: string;
   systemPromptOverride?: string;
   enableTools: boolean;
@@ -40,6 +41,78 @@ export interface PlannedSubtask {
   task: string;
   scope?: string[];
   depends_on?: string[];
+}
+
+function parsePlannedSubtasksFromObject(parsed: Record<string, unknown> | undefined): PlannedSubtask[] {
+  const tasksRaw = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+  if (tasksRaw.length === 0) {
+    return [];
+  }
+
+  const intermediate = tasksRaw.reduce<Array<{ label: string; task: string; scope: string[]; depends_on: string[] }>>((acc, item, index) => {
+    const record = item as Record<string, unknown>;
+    const label = String(record.label ?? "").trim();
+    const task = String(record.task ?? "").trim();
+    if (!task) {
+      return acc;
+    }
+
+    const scopeRaw = Array.isArray(record.scope) ? record.scope : [];
+    const dependsRaw = Array.isArray(record.depends_on) ? record.depends_on : [];
+    const scope = scopeRaw
+      .map((part) => String(part ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    const dependsOn = dependsRaw
+      .map((part) => String(part ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    acc.push({
+      label: label || `worker-task-${index + 1}`,
+      task,
+      scope,
+      depends_on: dependsOn
+    });
+    return acc;
+  }, []).slice(0, 8);
+
+  if (intermediate.length === 0) {
+    return [];
+  }
+
+  const labelCounts = new Map<string, number>();
+  const normalized = intermediate.map((item) => {
+    const seen = (labelCounts.get(item.label) ?? 0) + 1;
+    labelCounts.set(item.label, seen);
+    const label = seen === 1 ? item.label : `${item.label}-${seen}`;
+    return { ...item, label };
+  });
+
+  const allowedLabels = new Set(normalized.map((item) => item.label));
+  return normalized.map((item) => {
+    const depends = item.depends_on
+      .filter((label) => label !== item.label && allowedLabels.has(label))
+      .filter((label, index, arr) => arr.indexOf(label) === index)
+      .slice(0, 8);
+
+    const planned: PlannedSubtask = {
+      label: item.label,
+      task: item.task
+    };
+    if (item.scope.length > 0) {
+      planned.scope = item.scope;
+    }
+    if (depends.length > 0) {
+      planned.depends_on = depends;
+    }
+    return planned;
+  });
+}
+
+export function parsePlannedSubtasksText(text: string): PlannedSubtask[] {
+  const parsed = extractJsonObject(text);
+  return parsePlannedSubtasksFromObject(parsed);
 }
 
 function toToolCall(item: any): ToolCall {
@@ -265,74 +338,60 @@ export class GrokAgent {
       .sort((a: AgentModelInfo, b: AgentModelInfo) => a.id.localeCompare(b.id));
   }
 
-  async planSubtasks(goal: string, state: AgentState): Promise<PlannedSubtask[]> {
+  async planSubtasks(goal: string, state: AgentState, plannerModel?: string): Promise<PlannedSubtask[]> {
     const instructions = withUserSystemOverride(state.systemPromptOverride);
-    const response: any = await this.client.responses.create({
-      model: state.model,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text:
-                `Break this engineering goal into 2-6 executable worker tasks.\n\n` +
-                `Goal:\n${goal}\n\n` +
-                `Output strict JSON only:\n` +
-                `{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}\n\n` +
-                `Rules:\n` +
-                `- include one setup task when needed (files/directories/bootstrap)\n` +
-                `- implementation tasks should have disjoint scope whenever possible\n` +
-                `- test/verify tasks must depend_on implementation tasks\n` +
-                `- scope should be specific paths (files or directories)\n` +
-                `- depends_on values must reference labels from this same task list\n` +
-                `- do not include markdown`
-            }
-          ]
-        }
-      ],
-      instructions,
-      store: false
-    });
+    const planningModel = plannerModel?.trim() || state.plannerModel?.trim() || state.model;
+    const basePrompt =
+      `Break this engineering goal into 2-6 executable worker tasks.\n\n` +
+      `Goal:\n${goal}\n\n` +
+      `Output strict JSON only:\n` +
+      `{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}\n\n` +
+      `Rules:\n` +
+      `- include one setup task when needed (files/directories/bootstrap)\n` +
+      `- implementation tasks should have disjoint scope whenever possible\n` +
+      `- test/verify tasks must depend_on implementation tasks\n` +
+      `- scope should be specific paths (files or directories)\n` +
+      `- depends_on values must reference labels from this same task list\n` +
+      `- do not include markdown`;
+    const response: any = await this.createResponse(
+      {
+        model: planningModel,
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: basePrompt }]
+          }
+        ]
+      },
+      instructions
+    );
 
     const text = extractOutputText(response);
-    const parsed = extractJsonObject(text);
-    const tasksRaw = Array.isArray(parsed?.tasks) ? parsed?.tasks : [];
+    let tasks = parsePlannedSubtasksText(text);
 
-    const tasks = tasksRaw.reduce<PlannedSubtask[]>((acc, item) => {
-      const record = item as Record<string, unknown>;
-      const label = String(record.label ?? "").trim();
-      const task = String(record.task ?? "").trim();
-      if (!task) {
-        return acc;
-      }
+    if (tasks.length > 0) {
+      return tasks;
+    }
 
-      const scopeRaw = Array.isArray(record.scope) ? record.scope : [];
-      const dependsRaw = Array.isArray(record.depends_on) ? record.depends_on : [];
-      const scope = scopeRaw
-        .map((part) => String(part ?? "").trim())
-        .filter(Boolean)
-        .slice(0, 8);
-      const dependsOn = dependsRaw
-        .map((part) => String(part ?? "").trim())
-        .filter(Boolean)
-        .slice(0, 8);
+    const repairPrompt =
+      `Rewrite the following planner draft into strict JSON with this exact shape:\n` +
+      `{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}\n\n` +
+      `Return JSON only. No markdown.\n\n` +
+      `Draft:\n${text || "(empty response)"}`;
+    const repaired: any = await this.createResponse(
+      {
+        model: planningModel,
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: repairPrompt }]
+          }
+        ]
+      },
+      instructions
+    );
 
-      const planned: PlannedSubtask = {
-        label: label || "worker-task",
-        task
-      };
-      if (scope.length > 0) {
-        planned.scope = scope;
-      }
-      if (dependsOn.length > 0) {
-        planned.depends_on = dependsOn;
-      }
-
-      acc.push(planned);
-      return acc;
-    }, []).slice(0, 8);
-
+    tasks = parsePlannedSubtasksText(extractOutputText(repaired));
     if (tasks.length > 0) {
       return tasks;
     }

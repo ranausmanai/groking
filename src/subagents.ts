@@ -161,15 +161,25 @@ function normalizeScopePath(input: string): string | undefined {
     return undefined;
   }
 
+  const hasTrailingSeparator = /[\\/]$/.test(value);
   let normalized = path.normalize(value);
-  if (normalized.length > 1) {
-    normalized = normalized.replace(/[\\/]+$/, "");
-  }
+  normalized = normalized.replace(/[\\/]+$/, "");
   if (!normalized || normalized === ".") {
     return undefined;
   }
 
+  if (hasTrailingSeparator) {
+    return `${normalized}/`;
+  }
+
   return normalized;
+}
+
+function stripScopeSeparator(input: string): string {
+  if (input.length <= 1) {
+    return input;
+  }
+  return input.replace(/[\\/]+$/, "");
 }
 
 function scopesOverlap(left: string[] | undefined, right: string[] | undefined): boolean {
@@ -179,10 +189,12 @@ function scopesOverlap(left: string[] | undefined, right: string[] | undefined):
 
   for (const a of left) {
     for (const b of right) {
-      if (a === b) {
+      const aPath = stripScopeSeparator(a);
+      const bPath = stripScopeSeparator(b);
+      if (aPath === bPath) {
         return true;
       }
-      if (a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`)) {
+      if (aPath.startsWith(`${bPath}${path.sep}`) || bPath.startsWith(`${aPath}${path.sep}`)) {
         return true;
       }
     }
@@ -200,23 +212,38 @@ function isPathCoveredByScopes(filePath: string, scopes: string[] | undefined): 
   if (!normalizedFile) {
     return false;
   }
+  const filePathForMatch = stripScopeSeparator(normalizedFile);
 
   for (const scope of scopes) {
     const normalizedScope = normalizeScopePath(scope);
     if (!normalizedScope) {
       continue;
     }
+    const scopePath = stripScopeSeparator(normalizedScope);
 
-    if (normalizedFile === normalizedScope) {
+    if (filePathForMatch === scopePath) {
       return true;
     }
 
-    if (normalizedFile.startsWith(`${normalizedScope}${path.sep}`)) {
+    if (filePathForMatch.startsWith(`${scopePath}${path.sep}`)) {
       return true;
     }
   }
 
   return false;
+}
+
+function isDirectoryScope(scope: string): boolean {
+  return scope.endsWith("/");
+}
+
+function runLikelyRequiresFileChanges(run: SubagentRunRecord): boolean {
+  const fileScoped = (run.scope ?? []).filter((scope) => !isDirectoryScope(scope));
+  if (fileScoped.length === 0) {
+    return false;
+  }
+
+  return /\b(write|create|update|edit|modify|refactor|implement|add|remove|rename|patch)\b/i.test(run.task);
 }
 
 interface ProcessResult {
@@ -819,6 +846,7 @@ export class SubagentManager {
           run.scope?.length
             ? `Allowed write scope: ${run.scope.join(", ")}. Do not modify files outside this scope.`
             : undefined,
+          "If the task requests creating or editing files, you must actually make those file changes before finishing.",
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ]
@@ -852,9 +880,14 @@ export class SubagentManager {
       run.responseId = result.responseId;
       run.lastActivityAt = Date.now();
 
-      const patch = await generateWorkerPatch(snapshot, this.toolContext);
+      let patch = await generateWorkerPatch(snapshot, this.toolContext);
       run.patch = patch || undefined;
       run.patchFiles = patch ? extractPatchFiles(patch) : [];
+      if (!patch && runLikelyRequiresFileChanges(run)) {
+        throw new Error(
+          `task appears to require file edits but worker produced no changes (scope: ${run.scope?.join(", ") ?? "(none)"})`
+        );
+      }
       run.mergeStatus = patch ? "pending" : "skipped";
       run.currentAction = patch ? "waiting to merge" : "completed";
       this.emit({ type: "completed", run });

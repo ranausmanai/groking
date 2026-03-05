@@ -22,6 +22,8 @@ function printHelp(): void {
   console.log("  /reset             Clear server-side conversation link for this local session");
   console.log("  /model             Show current model");
   console.log("  /model <name>      Change model for next turns");
+  console.log("  /planner           Show current planner model");
+  console.log("  /planner <name>    Change planner model used by /agents run");
   console.log("  /models            List available models from API");
   console.log("  /agents help       Show subagent commands");
   console.log("  /agents run <goal> Planner splits goal and spawns workers");
@@ -233,6 +235,23 @@ export async function startRepl(options: ReplOptions): Promise<void> {
       continue;
     }
 
+    if (input === "/planner") {
+      console.log(`Current planner model: ${options.state.plannerModel ?? options.state.model}`);
+      console.log("Usage: /planner <name>");
+      continue;
+    }
+
+    if (input.startsWith("/planner ")) {
+      const model = input.replace("/planner", "").trim();
+      if (!model) {
+        console.log("Usage: /planner <name>");
+      } else {
+        options.state.plannerModel = model;
+        console.log(`Planner model set to ${model}`);
+      }
+      continue;
+    }
+
     if (input === "/models") {
       const spinner = new Spinner();
       try {
@@ -365,8 +384,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
         const spinner = new Spinner();
         try {
-          spinner.start("Planning worker tasks...");
-          const plan = await options.agent.planSubtasks(goal, options.state);
+          const plannerModel = options.state.plannerModel ?? options.state.model;
+          spinner.start(`Planning worker tasks with ${plannerModel}...`);
+          const plan = await options.agent.planSubtasks(goal, options.state, plannerModel);
           spinner.stop();
 
           const runs = options.subagents.spawnPlanned(plan);

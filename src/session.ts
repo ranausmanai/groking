@@ -8,6 +8,7 @@ export interface SessionData {
   name: string;
   workspace: string;
   model: string;
+  plannerModel?: string;
   previousResponseId?: string;
   createdAt: string;
   updatedAt: string;

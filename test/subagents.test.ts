@@ -313,3 +313,33 @@ test("SubagentManager rejects out-of-scope worker changes during merge", async (
   assert.match(finalRun?.mergeError ?? "", /scope violation/i);
   assert.equal(await fs.readFile(path.join(workspace, "index.html"), "utf8"), "<html></html>\n");
 });
+
+test("SubagentManager fails write-intent file-scoped task when no patch is produced", async () => {
+  const workspace = await makeWorkspace();
+  await fs.writeFile(path.join(workspace, "index.html"), "<html></html>\n", "utf8");
+
+  const fakeAgent = {
+    forkWithToolContext() {
+      return {
+        async run() {
+          return { text: "checked only", responseId: "r-nochange" };
+        }
+      };
+    }
+  };
+
+  const manager = new SubagentManager({
+    agent: fakeAgent as any,
+    getBaseState: () => ({ model: "grok-code-fast-1", enableTools: true }),
+    toolContext: createToolContext(workspace),
+    maxConcurrent: 1
+  });
+
+  const run = manager.spawn({ task: "write updated html", label: "writer", scope: ["index.html"] });
+  await manager.waitForIdle();
+
+  const finalRun = manager.getRun(run.id);
+  assert.equal(finalRun?.status, "failed");
+  assert.match(finalRun?.error ?? "", /require file edits/i);
+  assert.equal(await fs.readFile(path.join(workspace, "index.html"), "utf8"), "<html></html>\n");
+});

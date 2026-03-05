@@ -18,6 +18,7 @@ import { Spinner, formatError, formatToolResult, formatToolStart, printAssistant
 
 interface CliOptions {
   model: string;
+  plannerModel?: string;
   baseUrl: string;
   session?: string;
   system?: string;
@@ -52,6 +53,7 @@ async function persistSession(
     name: sessionName,
     workspace,
     model: state.model,
+    plannerModel: state.plannerModel,
     previousResponseId: state.previousResponseId,
     createdAt
   });
@@ -67,6 +69,7 @@ async function run(): Promise<void> {
     .description("Grok terminal coding assistant powered by xAI Responses API")
     .argument("[prompt...]", "Prompt text for one-shot mode. Leave empty for interactive mode.")
     .option("-m, --model <model>", "Grok model to use", process.env.GROK_MODEL ?? "grok-code-fast-1")
+    .option("--planner-model <model>", "Planner model for /agents run (defaults to --model)", process.env.GROK_PLANNER_MODEL)
     .option("--base-url <url>", "API base URL", process.env.XAI_BASE_URL ?? "https://api.x.ai/v1")
     .option("--session <name>", "Session name (defaults to workspace hash)")
     .option("--system <text>", "Additional system prompt")
@@ -100,6 +103,7 @@ async function run(): Promise<void> {
 
   const state: AgentState = {
     model: options.model,
+    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim() || options.model,
     previousResponseId: existingSession?.workspace === workspace ? existingSession.previousResponseId : undefined,
     systemPromptOverride: await readSystemOverride(options),
     enableTools: options.tools
@@ -218,6 +222,7 @@ async function run(): Promise<void> {
 
   console.log(`Workspace: ${workspace}`);
   console.log(`Model: ${state.model}`);
+  console.log(`Planner model: ${state.plannerModel ?? state.model}`);
   console.log(`Session file: ${sessionPath}`);
   if (state.previousResponseId) {
     console.log("Loaded existing session context.");

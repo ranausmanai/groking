@@ -110,6 +110,7 @@ groking [prompt...] [options]
 | Option | Default | Description |
 |---|---|---|
 | `-m, --model <model>` | `grok-code-fast-1` | Grok model to use |
+| `--planner-model <model>` | same as `--model` | Dedicated model for `/agents run` planning |
 | `--base-url <url>` | `https://api.x.ai/v1` | xAI API base URL |
 | `--session <name>` | workspace hash | Named session for conversation continuity |
 | `--system <text>` | — | Additional system prompt |
@@ -136,6 +137,8 @@ Once in the interactive REPL, use these commands:
 | `/reset` | Clear conversation context and start fresh |
 | `/model` | Show the current model |
 | `/model <name>` | Switch to a different model |
+| `/planner` | Show current planner model |
+| `/planner <name>` | Switch planner model used by `/agents run` |
 | `/models` | List all available models from the API |
 | `/tools on\|off` | Enable or disable local tool access |
 
@@ -181,7 +184,7 @@ Groking's most powerful feature is its **planner → parallel workers → merge*
 
 ### How it works
 
-1. **Plan** — The planner analyzes your goal and decomposes it into 2–6 scoped tasks with dependency ordering
+1. **Plan** — A dedicated planner model analyzes your goal and decomposes it into 2–6 scoped tasks with dependency ordering
 2. **Spawn** — Each task runs as an isolated worker agent with its own workspace snapshot
 3. **Execute** — Up to 4 workers run in parallel (with scope-aware contention prevention)
 4. **Merge** — Completed workers produce unified diff patches that are merged back in spawn order
