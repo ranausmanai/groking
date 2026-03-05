@@ -34,6 +34,7 @@
   "scripts": {
     "build": "tsup src/cli.ts --format esm --dts --clean",
     "dev": "tsx src/cli.ts",
+    "prepare": "npm run build",
     "start": "node dist/cli.js",
     "serve": "http-server -p 8080",
     "test": "node --import tsx --test test/**/*.test.ts"
@@ -54,7 +55,7 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
   },
-  "main": "controls.js",
+  "main": "dist/cli.js",
   "directories": {
     "doc": "docs",
     "test": "test"
