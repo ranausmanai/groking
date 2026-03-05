@@ -1,0 +1,46 @@
+{
+  "name": "groking-cli",
+  "version": "0.1.0",
+  "description": "Terminal coding agent for Grok via xAI Responses API",
+  "license": "MIT",
+  "author": "Usman",
+  "keywords": [
+    "grok",
+    "xai",
+    "cli",
+    "coding-agent",
+    "ai",
+    "terminal",
+    "refactor"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "bin": {
+    "groking": "dist/cli.js",
+    "grokcode": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --dts --clean",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js",
+    "test": "node --import tsx --test test/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "dotenv": "^17.2.3",
+    "openai": "^6.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2"
+  }
+}

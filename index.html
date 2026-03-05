@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smile Dental Clinic</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        @keyframes bounceIn {
+            0% { transform: scale(0.3); opacity: 0; }
+            50% { transform: scale(1.05); }
+            70% { transform: scale(0.9); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            color: #333;
+            line-height: 1.6;
+            animation: fadeIn 1s ease-out;
+        }
+        header {
+            background: #f39c12;
+            color: white;
+            padding: 10px 20px;
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .nav-links {
+            list-style: none;
+            display: flex;
+            margin: 0;
+            padding: 0;
+        }
+        .nav-links li {
+            margin-left: 20px;
+        }
+        .nav-links a {
+            color: white;
+            text-decoration: none;
+            transition: color 0.3s;
+        }
+        .nav-links a:hover {
+            color: #f1c40f;
+        }
+        .login-btn {
+            background: white;
+            color: #f39c12;
+            padding: 8px 16px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .login-btn:hover {
+            background: #f0f0f0;
+            transform: scale(1.05);
+        }
+        .hero {
+            background: linear-gradient(135deg, #f1c40f 0%, #f39c12 100%);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: white;
+            padding-top: 80px; /* Account for fixed header */
+            animation: bounceIn 1.5s ease-out;
+            opacity: 0;
+            animation-fill-mode: forwards;
+        }
+        .hero h1 {
+            font-size: 48px;
+            margin-bottom: 20px;
+            animation: fadeIn 2s ease-out 0.5s both;
+        }
+        .hero p {
+            font-size: 24px;
+            margin-bottom: 40px;
+            animation: fadeIn 2s ease-out 0.5s both;
+        }
+        .cta-btn {
+            background: white;
+            color: #f39c12;
+            padding: 15px 30px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        .cta-btn:hover {
+            background: #f0f0f0;
+            transform: translateY(-2px);
+        }
+        section {
+            padding: 80px 20px;
+            text-align: center;
+        }
+        .services {
+            background: #f8f9fa;
+            animation: slideInUp 1s ease-out 1s both;
+            opacity: 0;
+            animation-fill-mode: forwards;
+        }
+        .services h2 {
+            font-size: 36px;
+            margin-bottom: 40px;
+            color: #f39c12;
+        }
+        .service-grid {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+        }
+        .service-item {
+            width: 300px;
+            margin: 20px 0;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transform: translateY(20px);
+            opacity: 0;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            animation: slideInUp 1s ease-out both;
+        }
+        .service-item:nth-child(1) { animation-delay: 1.2s; }
+        .service-item:nth-child(2) { animation-delay: 1.4s; }
+        .service-item:nth-child(3) { animation-delay: 1.6s; }
+        .service-item:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        }
+        .service-item i {
+            font-size: 40px;
+            color: #f39c12;
+            margin-bottom: 20px;
+        }
+        .about {
+            background: white;
+            animation: slideInUp 1s ease-out 1.8s both;
+            opacity: 0;
+            animation-fill-mode: forwards;
+        }
+        .about h2 {
+            font-size: 36px;
+            margin-bottom: 40px;
+            color: #f39c12;
+        }
+        footer {
+            background: #f39c12;
+            color: white;
+            text-align: center;
+            padding: 20px;
+        }
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none; /* Simple hide for mobile; could add hamburger later */
+            }
+            .hero h1 {
+                font-size: 36px;
+            }
+            .hero p {
+                font-size: 18px;
+            }
+            .service-grid {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo"><i class="fas fa-tooth"></i> Smile Dental Clinic</div>
+            <ul class="nav-links">
+                <li><a href="#hero">Home</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+            <a href="login.html" class="login-btn">Login</a>
+        </nav>
+    </header>
+
+    <section id="hero" class="hero">
+        <div>
+            <h1>Welcome to Smile Dental Clinic</h1>
+            <p>Your health and smile are our top priorities.</p>
+            <a href="#services" class="cta-btn">Explore Our Services</a>
+        </div>
+    </section>
+
+    <section id="services" class="services">
+        <h2>Our Services</h2>
+        <div class="service-grid">
+            <div class="service-item">
+                <i class="fas fa-teeth"></i>
+                <h3>General Dentistry</h3>
+                <p>Comprehensive dental care for the whole family.</p>
+            </div>
+            <div class="service-item">
+                <i class="fas fa-toothbrush"></i>
+                <h3>Cosmetic Dentistry</h3>
+                <p>Enhance your smile with our cosmetic treatments.</p>
+            </div>
+            <div class="service-item">
+                <i class="fas fa-stethoscope"></i>
+                <h3>Emergency Care</h3>
+                <p>Quick and reliable emergency dental services.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="about" class="about">
+        <h2>About Us</h2>
+        <p>At Smile Dental Clinic, we are committed to providing high-quality dental care in a friendly and comfortable environment. Our experienced team uses the latest technology to ensure your visits are as pleasant as possible.</p>
+    </section>
+
+    <section id="contact" class="about">
+        <h2>Contact Us</h2>
+        <p>Phone: (123) 456-7890<br>Email: info@smiledental.com<br>Address: 123 Smile St, Dental City, DC 12345</p>
+    </section>
+
+    <footer>
+        <p>&copy; 2023 Smile Dental Clinic. All rights reserved.</p>
+    </footer>
+</body>
+</html>
