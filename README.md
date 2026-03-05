@@ -1,158 +1,302 @@
-# GROKING
+<p align="center">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="Node >= 20" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+  <img src="https://img.shields.io/badge/powered%20by-xAI%20Grok-blueviolet" alt="Powered by xAI Grok" />
+  <img src="https://img.shields.io/npm/v/groking-cli?color=orange" alt="npm version" />
+</p>
 
-A fast, terminal-first coding agent for Grok (`xAI`) with real file editing, patch workflows, live tool traces, and spawned worker agents.
+<h1 align="center">GROKING</h1>
 
-```text
-  GGG   RRRR    OOO   K  K  III  N   N   GGG
- G      R   R  O   O  K K    I   NN  N  G
- G  GG  RRRR   O   O  KK     I   N N N  G  GG
- G   G  R  R   O   O  K K    I   N  NN  G   G
-  GGG   R   R   OOO   K  K  III  N   N   GGG
+<p align="center">
+  <strong>A terminal-first coding agent powered by <a href="https://x.ai">xAI Grok</a></strong><br/>
+  Real file editing &bull; Patch workflows &bull; Parallel worker agents &bull; Session continuity
+</p>
+
+<br/>
+
+```
+  ██████  ██████   █████   ██  ██  ██  ██   ██   ██████
+  ██      ██   ██ ██   ██  ██ ██   ██  ███  ██  ██
+  ██  ███ ██████  ██   ██  ████    ██  ██ █ ██  ██  ███
+  ██   ██ ██  ██  ██   ██  ██ ██   ██  ██  ███  ██   ██
+   ██████ ██   ██  █████   ██  ██  ██  ██   ██   ██████
 ```
 
-## Why GROKING
+<br/>
 
-- Built for the real coding loop: inspect -> edit -> run checks -> refine
-- Patch-style refactors with unified diffs (`apply_unified_patch`)
-- Session continuity via `previous_response_id`
-- Multi-agent workflow: planner + isolated spawned worker subagents
-- Parallel worker execution with patch merge back into the main workspace
-- Better CLI UX: spinner, compact tool logs, readable colored output, markdown-aware assistant rendering
+## Why Groking?
 
-## Features
+Most AI coding tools run in the cloud or inside an IDE. **Groking** runs where you already work — your terminal. It connects directly to xAI's Responses API, gives the model full access to your local filesystem and shell, and supports a real coding loop:
 
-- Interactive REPL + one-shot mode
-- Local coding tools available to the model:
-  - `list_files`, `search_files`, `read_file`, `write_file`, `replace_in_file`, `delete_file`
-  - `apply_unified_patch`
-  - `run_command`, `git_status`, `get_workspace_info`
-- Slash commands:
-  - `/help`, `/reset`, `/exit`
-  - `/model`, `/model <name>`, `/models`
-  - `/tools on|off`
-- `/agents run <goal>`, `/agents spawn <task>`, `/agents status`, `/agents list`, `/agents result <id>`, `/agents log <id>`, `/agents wait`, `/agents clear`
-- First-run key onboarding:
-  - prompts for `XAI_API_KEY` if missing
-  - stores key at `~/.groking/config.json`
-- Session storage:
-  - `~/.groking/sessions/*.json`
+**Inspect → Edit → Run checks → Refine**
 
-## Install
+- **Patch-style refactoring** — multi-file changes via unified diffs (`apply_unified_patch`)
+- **Session continuity** — pick up where you left off across terminal sessions
+- **Multi-agent parallelism** — a planner breaks complex goals into isolated worker agents that run in parallel, then merges patches back
+- **Zero config** — just provide your xAI API key and start coding
 
-### Local (from source)
-
-```bash
-npm install
-npm run build
-node dist/cli.js
-```
-
-### Global (after publishing)
-
-```bash
-npm i -g groking-cli
-# then run:
-groking
-```
+---
 
 ## Quick Start
 
 ```bash
-cd /path/to/repo-you-want-to-edit
-groking --cwd .
+# Clone and build
+git clone https://github.com/ranausmanai/groking.git
+cd groking
+npm install
+npm run build
+
+# Run
+node dist/cli.js
 ```
 
-Example prompts:
+On first run, Groking will prompt for your `XAI_API_KEY` and save it to `~/.groking/config.json` for future sessions.
 
-```text
-Refactor the auth flow for clearer boundaries and run tests.
+```bash
+# Or set the key via environment
+export XAI_API_KEY="xai-..."
+node dist/cli.js
 ```
 
-```text
-Create a modern landing page with login CTA in top-right, then adjust to pink palette with subtle animations.
+### Install globally (after publishing)
+
+```bash
+npm i -g groking-cli
+groking
 ```
 
-## CLI
+---
 
-```text
+## Usage
+
+### Interactive mode (REPL)
+
+```bash
+groking --cwd /path/to/your/project
+```
+
+You'll get an interactive prompt where you can ask the agent to read, edit, refactor, debug, and run commands in your project.
+
+### One-shot mode
+
+```bash
+groking "fix the type error in src/utils.ts and run the tests"
+```
+
+```bash
+groking -p "add input validation to the signup handler"
+```
+
+### Example prompts
+
+```
+Refactor the auth flow into separate middleware layers and run tests.
+```
+```
+Find the bug causing the 500 on /api/users and fix it.
+```
+```
+Create a React component for the settings page with proper TypeScript types.
+```
+
+---
+
+## CLI Options
+
+```
 groking [prompt...] [options]
-
-Options:
-  -m, --model <model>             Grok model (default: grok-code-fast-1 or GROK_MODEL)
-  --base-url <url>                API base URL (default: https://api.x.ai/v1)
-  --session <name>                Session name; default is workspace hash
-  --system <text>                 Extra system instruction
-  --system-file <path>            Read extra system instruction from file
-  --cwd <path>                    Workspace root for tools
-  --no-tools                      Disable local tool access
-  -p, --prompt <text>             One-shot prompt
-  --reset                         Clear local saved session before run
-  --allow-outside-workspace       Allow tools outside --cwd
-  --timeout-ms <ms>               Default command timeout (default: 120000)
-  --max-file-bytes <bytes>        Max readable file size (default: 2000000)
-  --max-output-chars <chars>      Max stdout/stderr chars (default: 40000)
 ```
 
-## Agentic Workflow (Planner -> Parallel Workers -> Merge)
+| Option | Default | Description |
+|---|---|---|
+| `-m, --model <model>` | `grok-code-fast-1` | Grok model to use |
+| `--base-url <url>` | `https://api.x.ai/v1` | xAI API base URL |
+| `--session <name>` | workspace hash | Named session for conversation continuity |
+| `--system <text>` | — | Additional system prompt |
+| `--system-file <path>` | — | Load additional system prompt from file |
+| `--cwd <path>` | current dir | Workspace root for all tool operations |
+| `--no-tools` | — | Disable local tool access |
+| `-p, --prompt <text>` | — | One-shot prompt (alternative to positional args) |
+| `--reset` | `false` | Clear saved session state before starting |
+| `--allow-outside-workspace` | `false` | Allow file/shell operations outside workspace |
+| `--timeout-ms <ms>` | `120000` | Shell command timeout |
+| `--max-file-bytes <bytes>` | `2000000` | Max readable file size |
+| `--max-output-chars <chars>` | `40000` | Max captured stdout/stderr |
 
-Workers run in isolated workspace snapshots, execute in parallel, then return patches that are merged back into the main workspace in spawn order. The planner includes `scope` ownership and `depends_on` staging so setup can complete before dependent tasks run.
+---
 
-1. Run planner:
+## Slash Commands
 
-```text
-/agents run build a production-ready login + onboarding flow with tests
+Once in the interactive REPL, use these commands:
+
+| Command | Description |
+|---|---|
+| `/help` | Show all available commands |
+| `/exit`, `/quit` | Exit the REPL |
+| `/reset` | Clear conversation context and start fresh |
+| `/model` | Show the current model |
+| `/model <name>` | Switch to a different model |
+| `/models` | List all available models from the API |
+| `/tools on\|off` | Enable or disable local tool access |
+
+### Subagent commands
+
+| Command | Description |
+|---|---|
+| `/agents run <goal>` | Planner decomposes goal into parallel worker tasks |
+| `/agents spawn <task>` | Manually spawn a single worker agent |
+| `/agents status` | Show live progress (queued, running, completed, merge status) |
+| `/agents list` | List all workers with status, duration, scope, dependencies |
+| `/agents result <id>` | Show full output from a specific worker |
+| `/agents log <id>` | Show tool execution log for a worker |
+| `/agents wait` | Block until all workers complete |
+| `/agents clear` | Remove completed/failed workers from the list |
+
+---
+
+## Tools
+
+When tool access is enabled (the default), the model can use these local tools:
+
+| Tool | Description |
+|---|---|
+| `list_files` | List files and directories (supports recursive, hidden, max entries) |
+| `search_files` | Regex search across files using ripgrep (with glob filtering) |
+| `read_file` | Read file content with optional line range |
+| `write_file` | Write or create files (auto-creates directories) |
+| `replace_in_file` | Find and replace exact strings in a file |
+| `delete_file` | Delete a file |
+| `apply_unified_patch` | Apply unified diff patches for multi-file refactoring |
+| `run_command` | Execute shell commands in the workspace |
+| `git_status` | Get current git branch and status |
+| `get_workspace_info` | Show workspace path and configuration |
+
+All tools respect the workspace boundary by default. Use `--allow-outside-workspace` to relax this.
+
+---
+
+## Multi-Agent Workflow
+
+Groking's most powerful feature is its **planner → parallel workers → merge** pipeline. This lets you tackle complex, multi-file tasks by splitting them across isolated worker agents that execute in parallel.
+
+### How it works
+
+1. **Plan** — The planner analyzes your goal and decomposes it into 2–6 scoped tasks with dependency ordering
+2. **Spawn** — Each task runs as an isolated worker agent with its own workspace snapshot
+3. **Execute** — Up to 4 workers run in parallel (with scope-aware contention prevention)
+4. **Merge** — Completed workers produce unified diff patches that are merged back in spawn order
+
+### Example
+
+```
+groking> /agents run build a login page with form validation, add API route for auth, and write tests for both
+
+Planning... broke goal into 4 tasks:
+  1. setup       → Create shared types and constants
+  2. login-ui    → Build login page component (depends on: setup)
+  3. auth-api    → Add /api/auth route (depends on: setup)
+  4. tests       → Write tests for login + auth (depends on: login-ui, auth-api)
+
+groking> /agents status
+  Workers: 1 running, 1 queued, 2 waiting on dependencies
+  Merges:  0 applied, 0 conflicts
+
+groking> /agents wait
+  All 4 workers completed. 3 patches applied, 0 conflicts.
 ```
 
-2. Inspect workers:
+### Worker isolation
 
-```text
-/agents list
+- Each worker gets a **temporary snapshot** of your workspace in `/tmp/groking-worker-*`
+- Workers cannot interfere with each other or your live workspace
+- After completion, a `git diff --no-index` generates a clean patch
+- Patches skip build artifacts (`node_modules`, `dist`, `.next`, `coverage`, etc.)
+- Merge conflicts are detected and reported — no silent overwrites
+
+### Dependency resolution
+
+Workers can declare dependencies on other workers via the `depends_on` field. A worker won't start until its dependencies have completed and merged successfully. If a dependency fails or has a merge conflict, dependent workers are automatically blocked.
+
+---
+
+## Authentication
+
+Groking looks for your xAI API key in this order:
+
+1. `XAI_API_KEY` environment variable
+2. `~/.groking/config.json` (`xai_api_key` field)
+3. Interactive prompt (input is hidden) — saves to config for next time
+
+```bash
+# Option 1: environment variable
+export XAI_API_KEY="xai-..."
+
+# Option 2: .env file in your project
+echo 'XAI_API_KEY=xai-...' >> .env
+
+# Option 3: just run groking and paste when prompted
 ```
 
-3. Wait for all workers:
+---
 
-```text
-/agents wait
-```
+## Session Management
 
-4. Inspect worker + merge status:
+Groking persists conversation context across sessions so you can close your terminal and pick up where you left off.
 
-```text
-/agents status
-/agents list
-```
+- **Storage**: `~/.groking/sessions/<name>.json`
+- **Default name**: SHA-1 hash of your workspace path
+- **Custom name**: `groking --session my-project`
+- **Reset**: `groking --reset` or `/reset` in the REPL
 
-5. Inspect result from one worker:
+Sessions store the `previousResponseId` from xAI's Responses API, which maintains full conversation history server-side without re-sending messages.
 
-```text
-/agents result <id>
-```
+---
 
-## Safety Model
+## Safety
 
-- Workspace path boundaries enabled by default
-- Patch validation before apply (`git apply --check --no-index`)
-- Command output and file-read caps
-- Tool loop guard for runaway tool calling
+Groking includes several guardrails to prevent accidents:
+
+- **Workspace boundaries** — tools are restricted to your `--cwd` by default
+- **Patch validation** — patches are verified with `git apply --check` before applying
+- **Output caps** — file reads and command output are capped to prevent context overflow
+- **Tool loop guard** — max 24 tool rounds per turn to prevent runaway loops
+- **Patch size limits** — rejects patches over 900KB (likely build artifacts)
+- **Excluded directories** — patches automatically skip `node_modules`, `dist`, `.next`, `.nuxt`, `coverage`, `.cache`, `.turbo`, `.vite`
+
+---
 
 ## Architecture
 
-- `src/cli.ts` - startup, CLI args, one-shot/repl wiring
-- `src/repl.ts` - slash commands and interactive loop
-- `src/agent.ts` - xAI Responses orchestration + tool loop + planner support
-- `src/subagents.ts` - spawned worker registry/execution manager
-- `src/tools.ts` - local tool implementations
-- `src/ui.ts` - spinner, colors, markdown-aware output formatting
-- `src/session.ts` - persisted session linkage
-- `src/auth.ts` - interactive API key setup
-- `src/banner.ts` - GROKING startup banner
+```
+src/
+├── cli.ts          # Entry point, CLI argument parsing, one-shot/REPL wiring
+├── repl.ts         # Interactive loop, slash commands, subagent UI
+├── agent.ts        # xAI Responses API orchestration, tool loop, planner
+├── subagents.ts    # Worker registry, isolation, parallel execution, patch merging
+├── tools.ts        # Local tool implementations (file ops, shell, git)
+├── prompts.ts      # System prompt for the coding agent
+├── ui.ts           # Spinner, colors, markdown rendering
+├── session.ts      # Session persistence
+├── auth.ts         # API key resolution and storage
+└── banner.ts       # Startup banner
+```
+
+---
 
 ## Development
 
 ```bash
-npm test
+# Type-check
 npx tsc --noEmit
+
+# Run tests
+npm test
+
+# Build
 npm run build
+
+# Dev mode (no build step)
+npm run dev
 ```
 
 ## Publishing
@@ -161,6 +305,16 @@ npm run build
 npm version patch
 npm publish --access public
 ```
+
+---
+
+## Requirements
+
+- **Node.js** >= 20
+- **ripgrep** (`rg`) — used by `search_files` tool (install via `brew install ripgrep` or your package manager)
+- An **xAI API key** — get one at [console.x.ai](https://console.x.ai)
+
+---
 
 ## License
 

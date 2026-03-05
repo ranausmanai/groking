@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grok Animation - Three.js</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">Grok Animation - Rotate and Zoom with Mouse</div>
+    <div id="controls">Click and drag to rotate, scroll to zoom</div>
+    <script>
+        // Scene, Camera, Renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 5, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        // Ground
+        const groundGeometry = new THREE.PlaneGeometry(20, 20);
+        const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Grok Representation: A floating cube with text
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshStandardMaterial({
+            color: 0x00ff88,
+            metalness: 0.5,
+            roughness: 0.2,
+            emissive: 0x004422
+        });
+        const cube = new THREE.Mesh(geometry, material);
+        cube.position.y = 1;
+        cube.castShadow = true;
+        scene.add(cube);
+
+        // Add text "Grok" using TextGeometry (requires FontLoader)
+        const loader = new THREE.FontLoader();
+        loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function (font) {
+            const textGeometry = new THREE.TextGeometry('Grok', {
+                font: font,
+                size: 0.5,
+                height: 0.1,
+                curveSegments: 12,
+                bevelEnabled: true,
+                bevelThickness: 0.03,
+                bevelSize: 0.02,
+                bevelOffset: 0,
+                bevelSegments: 5
+            });
+            const textMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0x333333 });
+            const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+            textMesh.position.set(-1.5, 2, 0);
+            textMesh.castShadow = true;
+            scene.add(textMesh);
+
+            // Animate text floating
+            function animateText() {
+                textMesh.rotation.y += 0.01;
+                textMesh.position.y = 2 + Math.sin(Date.now() * 0.001) * 0.2;
+            }
+
+            // Particles around
+            const particleGeometry = new THREE.BufferGeometry();
+            const particleCount = 100;
+            const positions = new Float32Array(particleCount * 3);
+            for (let i = 0; i < particleCount * 3; i++) {
+                positions[i] = (Math.random() - 0.5) * 10;
+            }
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const particleMaterial = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.05 });
+            const particles = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(particles);
+
+            // Animate particles
+            function animateParticles() {
+                const positions = particles.geometry.attributes.position.array;
+                for (let i = 0; i < particleCount; i++) {
+                    positions[i * 3 + 1] += Math.sin(Date.now() * 0.001 + i) * 0.01;
+                }
+                particles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+
+            // Controls
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // Rotate cube
+                cube.rotation.x += 0.01;
+                cube.rotation.y += 0.01;
+
+                animateText();
+                animateParticles();
+
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+        });
+
+        // Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

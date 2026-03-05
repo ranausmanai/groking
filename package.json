@@ -35,6 +35,7 @@
     "build": "tsup src/cli.ts --format esm --dts --clean",
     "dev": "tsx src/cli.ts",
     "start": "node dist/cli.js",
+    "serve": "http-server -p 8080",
     "test": "node --import tsx --test test/**/*.test.ts"
   },
   "engines": {
@@ -43,12 +44,19 @@
   "dependencies": {
     "commander": "^14.0.0",
     "dotenv": "^17.2.3",
-    "openai": "^6.6.0"
+    "openai": "^6.6.0",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/node": "^22.18.0",
+    "http-server": "^14.1.1",
     "tsup": "^8.5.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.2"
+  },
+  "main": "controls.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
   }
 }

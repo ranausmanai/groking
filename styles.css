@@ -1,0 +1,132 @@
+/* CSS Variables for modern theming */
+:root {
+  --primary-color: #333;
+  --secondary-color: #4CAF50;
+  --accent-color: #45a049;
+  --background-color: #fff;
+  --text-color: #333;
+  --hero-bg: #f4f4f4;
+  --footer-bg: #333;
+  --shadow: rgba(0, 0, 0, 0.1);
+  --border-radius: 4px;
+  --padding: 1rem;
+}
+
+/* General Styles */
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
+  color: var(--text-color);
+  background-color: var(--background-color);
+}
+
+header {
+  background-color: var(--primary-color);
+  color: var(--background-color);
+  padding: var(--padding);
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+header h1 {
+  margin: 0;
+}
+
+/* Top-right login button */
+.login-btn {
+  position: absolute;
+  top: var(--padding);
+  right: var(--padding);
+  background-color: var(--secondary-color);
+  color: var(--background-color);
+  padding: 0.5rem 1rem;
+  text-decoration: none;
+  border-radius: var(--border-radius);
+  transition: background-color 0.3s ease;
+}
+
+.login-btn:hover {
+  background-color: var(--accent-color);
+}
+
+/* Sections */
+section {
+  padding: 4rem 2rem;
+  text-align: center;
+}
+
+.hero {
+  background-color: var(--hero-bg);
+  height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.features {
+  background-color: var(--background-color);
+}
+
+.features .feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  justify-items: center;
+}
+
+.feature-item {
+  padding: 1rem;
+  box-shadow: 0 0 10px var(--shadow);
+  border-radius: var(--border-radius);
+  width: 100%;
+  max-width: 300px;
+}
+
+footer {
+  background-color: var(--footer-bg);
+  color: var(--background-color);
+  padding: var(--padding);
+  text-align: center;
+}
+
+/* Responsive Media Queries */
+@media (max-width: 768px) {
+  /* Mobile styles */
+  header {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .login-btn {
+    position: static;
+    margin-top: 1rem;
+  }
+
+  section {
+    padding: 2rem 1rem;
+  }
+
+  .hero {
+    height: auto;
+    padding: 2rem 0;
+  }
+
+  .features .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-item {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 769px) {
+  /* Desktop styles */
+  .features .feature-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
