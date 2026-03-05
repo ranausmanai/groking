@@ -1,6 +1,6 @@
 {
   "name": "groking-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Terminal coding agent for Grok via xAI Responses API",
   "license": "MIT",
   "author": "Usman",
