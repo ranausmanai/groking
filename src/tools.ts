@@ -508,10 +508,7 @@ function chooseStripLevels(patch: string): number[] {
   return hasGitPrefixes ? [1, 0] : [0, 1];
 }
 
-async function applyUnifiedPatchTool(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown> {
-  const patch = String(args.patch ?? "");
-  const dryRun = Boolean(args.dry_run);
-
+export async function applyUnifiedPatch(patch: string, ctx: ToolContext, dryRun = false): Promise<unknown> {
   if (!patch.trim()) {
     throw new Error("patch must be non-empty");
   }
@@ -603,6 +600,10 @@ async function applyUnifiedPatchTool(args: Record<string, unknown>, ctx: ToolCon
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true });
   }
+}
+
+async function applyUnifiedPatchTool(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown> {
+  return await applyUnifiedPatch(String(args.patch ?? ""), ctx, Boolean(args.dry_run));
 }
 
 async function searchFilesTool(args: Record<string, unknown>, ctx: ToolContext): Promise<unknown> {

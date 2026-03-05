@@ -1,8 +1,9 @@
 import readline from "node:readline/promises";
+import * as nodeReadline from "node:readline";
 import process from "node:process";
 
 import { GrokAgent, type AgentState } from "./agent.js";
-import type { SubagentManager } from "./subagents.js";
+import { describeSubagentRun, type SubagentManager } from "./subagents.js";
 import { summarizeToolResult } from "./tools.js";
 import { Spinner, formatError, formatPrompt, formatToolResult, formatToolStart, printAssistantText } from "./ui.js";
 
@@ -12,6 +13,7 @@ export interface ReplOptions {
   state: AgentState;
   onResponseId: (responseId: string, state: AgentState) => Promise<void>;
   onReset: () => Promise<void>;
+  pullNotifications?: () => string[];
 }
 
 function printHelp(): void {
@@ -24,8 +26,10 @@ function printHelp(): void {
   console.log("  /agents help       Show subagent commands");
   console.log("  /agents run <goal> Planner splits goal and spawns workers");
   console.log("  /agents spawn <task> Spawn one worker subagent");
+  console.log("  /agents status     Show live worker/merge summary");
   console.log("  /agents list       List worker runs");
   console.log("  /agents result <id> Show one worker result");
+  console.log("  /agents log <id>   Show one worker tool log");
   console.log("  /agents wait       Wait until workers are done");
   console.log("  /agents clear      Remove completed/failed runs from list");
   console.log("  /tools on|off      Enable or disable local tool access");
@@ -36,10 +40,61 @@ function printAgentsHelp(): void {
   console.log("Subagent commands:");
   console.log("  /agents run <goal>");
   console.log("  /agents spawn <task>");
+  console.log("  /agents status");
   console.log("  /agents list");
   console.log("  /agents result <id>");
+  console.log("  /agents log <id>");
   console.log("  /agents wait");
   console.log("  /agents clear");
+}
+
+function truncateForStatus(text: string, max = 220): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function formatElapsedShort(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remaining = seconds % 60;
+  return `${minutes}m${remaining}s`;
+}
+
+function printRunSummary(runId: string, summary: string | undefined): void {
+  if (!summary) {
+    return;
+  }
+
+  console.log(`  ${runId}: ${summary}`);
+}
+
+function isTerminalRunStatus(status: string): boolean {
+  return status === "completed" || status === "failed";
+}
+
+function stripAnsi(input: string): string {
+  return input.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function printLiveNotice(rl: readline.Interface, prompt: string, message: string, awaitingInput: boolean): void {
+  if (!awaitingInput || !process.stdout.isTTY) {
+    console.log(message);
+    return;
+  }
+
+  const line = typeof (rl as any).line === "string" ? (rl as any).line : "";
+  const cursor = typeof (rl as any).cursor === "number" ? (rl as any).cursor : line.length;
+  const visiblePromptLength = stripAnsi(prompt).length;
+
+  nodeReadline.clearLine(process.stdout, 0);
+  nodeReadline.cursorTo(process.stdout, 0);
+  process.stdout.write(`${message}\n`);
+  process.stdout.write(prompt);
+  process.stdout.write(line);
+  nodeReadline.cursorTo(process.stdout, visiblePromptLength + cursor);
 }
 
 export async function startRepl(options: ReplOptions): Promise<void> {
@@ -50,9 +105,95 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   });
 
   printHelp();
+  let awaitingInput = false;
+  const promptText = formatPrompt();
+  const heartbeatFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let heartbeatIndex = 0;
+  let lastHeartbeatAt = 0;
+  const trackedRunIds = new Set<string>();
+
+  const notificationTimer = setInterval(() => {
+    const pending = options.pullNotifications?.() ?? [];
+    if (pending.length === 0) {
+      const progress = options.subagents.getProgressEntries();
+      if (progress.length === 0) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastHeartbeatAt < 1800) {
+        return;
+      }
+
+      heartbeatIndex = (heartbeatIndex + 1) % heartbeatFrames.length;
+      lastHeartbeatAt = now;
+      const details = progress
+        .slice(0, 3)
+        .map((entry) => `${entry.id} ${entry.label} [${entry.phase}] ${entry.action} (${formatElapsedShort(entry.elapsedMs)})`)
+        .join(" | ");
+      const suffix = progress.length > 3 ? ` | +${progress.length - 3} more` : "";
+      printLiveNotice(
+        rl,
+        promptText,
+        truncateForStatus(`status> ${heartbeatFrames[heartbeatIndex]} ${details}${suffix}`),
+        awaitingInput
+      );
+      return;
+    }
+    for (const note of pending) {
+      lastHeartbeatAt = Date.now();
+      printLiveNotice(rl, promptText, note, awaitingInput);
+    }
+
+    if (trackedRunIds.size === 0) {
+      return;
+    }
+
+    const trackedRuns = [...trackedRunIds]
+      .map((id) => options.subagents.getRun(id))
+      .filter((run): run is NonNullable<typeof run> => Boolean(run));
+
+    if (trackedRuns.length === 0) {
+      trackedRunIds.clear();
+      return;
+    }
+
+    const allTerminal = trackedRuns.every((run) => isTerminalRunStatus(run.status));
+    if (!allTerminal) {
+      return;
+    }
+
+    const completed = trackedRuns.filter((run) => run.status === "completed").length;
+    const failed = trackedRuns.filter((run) => run.status === "failed").length;
+    const mergeApplied = trackedRuns.filter((run) => run.mergeStatus === "applied").length;
+    const mergeConflict = trackedRuns.filter((run) => run.mergeStatus === "conflict").length;
+    const mergeSkipped = trackedRuns.filter((run) => run.mergeStatus === "skipped").length;
+    const changedFiles = [...new Set(trackedRuns.flatMap((run) => run.patchFiles ?? []))];
+    const openHint = changedFiles[0];
+
+    printLiveNotice(
+      rl,
+      promptText,
+      `agents> batch complete: completed=${completed} failed=${failed} merged=${mergeApplied} conflicts=${mergeConflict} skipped=${mergeSkipped}`,
+      awaitingInput
+    );
+    if (changedFiles.length > 0) {
+      const preview = changedFiles.slice(0, 4).join(", ");
+      const suffix = changedFiles.length > 4 ? ` +${changedFiles.length - 4} more` : "";
+      printLiveNotice(rl, promptText, `agents> changed files: ${preview}${suffix}`, awaitingInput);
+    }
+    if (openHint) {
+      printLiveNotice(rl, promptText, `agents> open first: ${openHint}`, awaitingInput);
+    }
+
+    trackedRunIds.clear();
+  }, 160);
+  notificationTimer.unref?.();
 
   while (true) {
-    const raw = await rl.question(formatPrompt());
+    awaitingInput = true;
+    const raw = await rl.question(promptText);
+    awaitingInput = false;
     const input = raw.trim();
 
     if (!input) {
@@ -147,7 +288,52 @@ export async function startRepl(options: ReplOptions): Promise<void> {
             typeof run.startedAt === "number" && typeof run.endedAt === "number"
               ? ` (${Math.max(0, run.endedAt - run.startedAt)}ms)`
               : "";
-          console.log(`  - ${run.id} [${run.status}] ${run.label}${duration}`);
+          const merge =
+            run.status === "completed"
+              ? ` merge=${run.mergeStatus ?? "n/a"}`
+              : "";
+          const action =
+            run.currentAction && (run.status === "running" || run.status === "queued" || run.mergeStatus === "pending")
+              ? ` action=${run.currentAction}`
+              : "";
+          const scope = run.scope?.length ? ` scope=${run.scope.join(",")}` : "";
+          const deps = run.dependsOn?.length ? ` depends_on=${run.dependsOn.join(",")}` : "";
+          console.log(`  - ${run.id} [${run.status}] ${run.label}${duration}${merge}${action}${scope}${deps}`);
+        }
+        continue;
+      }
+
+      if (command === "status") {
+        const overview = options.subagents.getStatusOverview();
+        console.log(
+          `Workers: queued=${overview.queued} running=${overview.running} completed=${overview.completed} failed=${overview.failed}`
+        );
+        console.log(
+          `Merge: pending=${overview.mergePending} applied=${overview.mergeApplied} conflict=${overview.mergeConflict} skipped=${overview.mergeSkipped}`
+        );
+
+        const progress = options.subagents.getProgressEntries();
+        if (progress.length > 0) {
+          console.log("Live progress:");
+          for (const entry of progress.slice(0, 8)) {
+            console.log(
+              `  - ${entry.id} ${entry.label} [${entry.phase}] ${entry.action} (${formatElapsedShort(entry.elapsedMs)})`
+            );
+          }
+        }
+
+        const latestCompleted = options
+          .subagents
+          .listRuns()
+          .filter((run) => run.status === "completed" || run.status === "failed")
+          .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))
+          .slice(0, 5);
+        if (latestCompleted.length > 0) {
+          console.log("Recent outcomes:");
+          for (const run of latestCompleted) {
+            const summary = describeSubagentRun(run) || "(no summary)";
+            console.log(`  - ${run.id} [${run.status}] ${run.label}: ${summary}`);
+          }
         }
         continue;
       }
@@ -160,7 +346,13 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         }
 
         const run = options.subagents.spawn({ task, label: "worker" });
+        trackedRunIds.add(run.id);
         console.log(`Spawned subagent ${run.id} [queued]`);
+        continue;
+      }
+
+      if (command === "spawn") {
+        console.log("Usage: /agents spawn <task>");
         continue;
       }
 
@@ -178,15 +370,25 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           spinner.stop();
 
           const runs = options.subagents.spawnPlanned(plan);
+          for (const run of runs) {
+            trackedRunIds.add(run.id);
+          }
           console.log(`Spawned ${runs.length} subagents from planner:`);
           for (const run of runs) {
-            console.log(`  - ${run.id} [${run.status}] ${run.label}`);
+            const scope = run.scope?.length ? ` scope=${run.scope.join(",")}` : "";
+            const deps = run.dependsOn?.length ? ` depends_on=${run.dependsOn.join(",")}` : "";
+            console.log(`  - ${run.id} [${run.status}] ${run.label}${scope}${deps}`);
           }
         } catch (error) {
           spinner.stop();
           const message = error instanceof Error ? error.message : String(error);
           console.error(formatError(`Failed to run planner: ${message}`));
         }
+        continue;
+      }
+
+      if (command === "run") {
+        console.log("Usage: /agents run <goal>");
         continue;
       }
 
@@ -197,6 +399,17 @@ export async function startRepl(options: ReplOptions): Promise<void> {
           await options.subagents.waitForIdle();
           spinner.stop();
           console.log("All subagents are idle.");
+          const finishedRuns = options
+            .subagents
+            .listRuns()
+            .filter((run) => run.status === "completed" || run.status === "failed")
+            .sort((a, b) => a.sequence - b.sequence);
+          if (finishedRuns.length > 0) {
+            console.log("Run summary:");
+            for (const run of finishedRuns) {
+              printRunSummary(run.id, describeSubagentRun(run));
+            }
+          }
         } catch (error) {
           spinner.stop();
           const message = error instanceof Error ? error.message : String(error);
@@ -225,8 +438,21 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         }
 
         console.log(`Subagent ${run.id} [${run.status}] ${run.label}`);
+        if (run.mergeStatus) {
+          console.log(`Merge: ${run.mergeStatus}`);
+        }
         if (run.error) {
           console.log(`Error: ${run.error}`);
+        }
+        if (run.mergeError) {
+          console.log(`Merge error: ${run.mergeError}`);
+        }
+        if (run.patchFiles?.length) {
+          console.log(`Patch files: ${run.patchFiles.join(", ")}`);
+        }
+        const summary = describeSubagentRun(run);
+        if (summary) {
+          console.log(`Summary: ${summary}`);
         }
         if (run.output) {
           printAssistantText(run.output);
@@ -236,7 +462,43 @@ export async function startRepl(options: ReplOptions): Promise<void> {
         continue;
       }
 
+      if (command === "result") {
+        console.log("Usage: /agents result <id>");
+        continue;
+      }
+
+      if (command.startsWith("log ")) {
+        const id = command.slice("log ".length).trim();
+        if (!id) {
+          console.log("Usage: /agents log <id>");
+          continue;
+        }
+
+        const run = options.subagents.getRun(id);
+        if (!run) {
+          console.log(`Unknown subagent id: ${id}`);
+          continue;
+        }
+
+        if (run.logs.length === 0) {
+          console.log("No logs recorded for this subagent.");
+          continue;
+        }
+
+        console.log(`Logs for ${run.id} (${run.label}):`);
+        for (const line of run.logs) {
+          console.log(`  ${line}`);
+        }
+        continue;
+      }
+
       printAgentsHelp();
+      continue;
+    }
+
+    const activeWorkers = options.subagents.getProgressEntries();
+    if (activeWorkers.length > 0 && /\b(status|progress|done|update|what happened|what was done)\b/i.test(input)) {
+      console.log("Subagents are still active. Use `/agents status` for live progress or `/agents wait` for final summary.");
       continue;
     }
 
@@ -272,5 +534,6 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     }
   }
 
+  clearInterval(notificationTimer);
   rl.close();
 }

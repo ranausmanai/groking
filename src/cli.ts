@@ -12,7 +12,7 @@ import { resolveApiKeyInteractive } from "./auth.js";
 import { printGrokingBanner } from "./banner.js";
 import { startRepl } from "./repl.js";
 import { clearSession, loadSession, resolveSessionPath, saveSession } from "./session.js";
-import { SubagentManager } from "./subagents.js";
+import { describeSubagentRun, SubagentManager } from "./subagents.js";
 import { summarizeToolResult } from "./tools.js";
 import { Spinner, formatError, formatToolResult, formatToolStart, printAssistantText } from "./ui.js";
 
@@ -105,51 +105,75 @@ async function run(): Promise<void> {
     enableTools: options.tools
   };
 
+  const toolContext = {
+    workspaceCwd: workspace,
+    allowOutsideWorkspace: options.allowOutsideWorkspace,
+    defaultCommandTimeoutMs: options.timeoutMs,
+    maxFileBytes: options.maxFileBytes,
+    maxCommandOutputChars: options.maxOutputChars
+  };
+
   const agent = new GrokAgent({
     apiKey,
     baseURL: options.baseUrl,
-    toolContext: {
-      workspaceCwd: workspace,
-      allowOutsideWorkspace: options.allowOutsideWorkspace,
-      defaultCommandTimeoutMs: options.timeoutMs,
-      maxFileBytes: options.maxFileBytes,
-      maxCommandOutputChars: options.maxOutputChars
-    }
+    toolContext
   });
 
   const oneShotPrompt = options.prompt?.trim() || promptArgs.join(" ").trim();
+  const subagentNotifications: string[] = [];
   const subagents = new SubagentManager({
     agent,
-    maxConcurrent: 1,
+    toolContext,
+    maxConcurrent: 4,
     getBaseState: () => ({
       ...state,
       previousResponseId: undefined
     }),
     onEvent: (event) => {
       if (event.type === "queued") {
-        console.log(`subagent> queued ${event.run.id} ${event.run.label}`);
+        subagentNotifications.push(`subagent> queued ${event.run.id} ${event.run.label}`);
         return;
       }
       if (event.type === "started") {
-        console.log(`subagent> started ${event.run.id} ${event.run.label}`);
+        subagentNotifications.push(`subagent> started ${event.run.id} ${event.run.label}`);
         return;
       }
       if (event.type === "completed") {
-        console.log(`subagent> done ${event.run.id} ${event.run.label}`);
+        subagentNotifications.push(`subagent> done ${event.run.id} ${event.run.label}`);
+        return;
+      }
+      if (event.type === "merge_started") {
+        subagentNotifications.push(`subagent> merging ${event.run.id} ${event.run.label}`);
+        return;
+      }
+      if (event.type === "merged") {
+        const files = event.run.patchFiles?.length ? ` (${event.run.patchFiles.length} files)` : "";
+        subagentNotifications.push(`subagent> merged ${event.run.id} ${event.run.label}${files}`);
+        const detail = describeSubagentRun(event.run);
+        if (detail) {
+          subagentNotifications.push(`subagent> summary ${event.run.id} ${detail}`);
+        }
+        return;
+      }
+      if (event.type === "merge_failed") {
+        subagentNotifications.push(
+          formatError(`subagent ${event.run.id} merge failed: ${event.run.mergeError ?? "unknown error"}`)
+        );
         return;
       }
       if (event.type === "failed") {
-        console.log(formatError(`subagent ${event.run.id} failed: ${event.run.error ?? "unknown error"}`));
+        subagentNotifications.push(
+          formatError(`subagent ${event.run.id} failed: ${event.run.error ?? "unknown error"}`)
+        );
         return;
       }
       if (event.type === "tool_start") {
-        console.log(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
+        subagentNotifications.push(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
         return;
       }
       if (event.type === "tool_result") {
-        console.log(
-          `subagent:${event.run.id} ${formatToolResult(event.call.name, summarizeToolResult(event.result))}`
-        );
+        const summary = summarizeToolResult(event.result);
+        subagentNotifications.push(`subagent:${event.run.id} ${formatToolResult(event.call.name, summary)}`);
       }
     }
   });
@@ -204,7 +228,12 @@ async function run(): Promise<void> {
     subagents,
     state,
     onResponseId,
-    onReset
+    onReset,
+    pullNotifications: () => {
+      const items = [...subagentNotifications];
+      subagentNotifications.length = 0;
+      return items;
+    }
   });
 }
 

@@ -15,7 +15,8 @@ A fast, terminal-first coding agent for Grok (`xAI`) with real file editing, pat
 - Built for the real coding loop: inspect -> edit -> run checks -> refine
 - Patch-style refactors with unified diffs (`apply_unified_patch`)
 - Session continuity via `previous_response_id`
-- Multi-agent workflow: planner + spawned worker subagents
+- Multi-agent workflow: planner + isolated spawned worker subagents
+- Parallel worker execution with patch merge back into the main workspace
 - Better CLI UX: spinner, compact tool logs, readable colored output, markdown-aware assistant rendering
 
 ## Features
@@ -29,7 +30,7 @@ A fast, terminal-first coding agent for Grok (`xAI`) with real file editing, pat
   - `/help`, `/reset`, `/exit`
   - `/model`, `/model <name>`, `/models`
   - `/tools on|off`
-  - `/agents run <goal>`, `/agents spawn <task>`, `/agents list`, `/agents result <id>`, `/agents wait`, `/agents clear`
+- `/agents run <goal>`, `/agents spawn <task>`, `/agents status`, `/agents list`, `/agents result <id>`, `/agents log <id>`, `/agents wait`, `/agents clear`
 - First-run key onboarding:
   - prompts for `XAI_API_KEY` if missing
   - stores key at `~/.groking/config.json`
@@ -92,7 +93,9 @@ Options:
   --max-output-chars <chars>      Max stdout/stderr chars (default: 40000)
 ```
 
-## Agentic Workflow (Planner -> Workers)
+## Agentic Workflow (Planner -> Parallel Workers -> Merge)
+
+Workers run in isolated workspace snapshots, execute in parallel, then return patches that are merged back into the main workspace in spawn order. The planner includes `scope` ownership and `depends_on` staging so setup can complete before dependent tasks run.
 
 1. Run planner:
 
@@ -112,7 +115,14 @@ Options:
 /agents wait
 ```
 
-4. Inspect result from one worker:
+4. Inspect worker + merge status:
+
+```text
+/agents status
+/agents list
+```
+
+5. Inspect result from one worker:
 
 ```text
 /agents result <id>

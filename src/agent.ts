@@ -9,6 +9,10 @@ interface AgentHooks {
   onToolCallResult?: (call: ToolCall, result: ToolExecutionResult) => void;
 }
 
+export interface AgentRunOptions {
+  maxToolRounds?: number;
+}
+
 export interface AgentState {
   model: string;
   previousResponseId?: string;
@@ -34,6 +38,8 @@ export interface AgentModelInfo {
 export interface PlannedSubtask {
   label: string;
   task: string;
+  scope?: string[];
+  depends_on?: string[];
 }
 
 function toToolCall(item: any): ToolCall {
@@ -117,13 +123,28 @@ function extractJsonObject(text: string): Record<string, unknown> | undefined {
 
 export class GrokAgent {
   private readonly client: OpenAI;
+  private readonly apiKey: string;
+  private readonly baseURL: string;
   private readonly toolContext: ToolContext;
   private instructionsSupported = true;
   private instructionsWithPreviousResponseSupported = true;
 
   constructor(config: AgentConfig) {
+    this.apiKey = config.apiKey;
+    this.baseURL = config.baseURL;
     this.client = new OpenAI({ apiKey: config.apiKey, baseURL: config.baseURL });
     this.toolContext = config.toolContext;
+  }
+
+  forkWithToolContext(toolContext: ToolContext): GrokAgent {
+    const next = new GrokAgent({
+      apiKey: this.apiKey,
+      baseURL: this.baseURL,
+      toolContext
+    });
+    next.instructionsSupported = this.instructionsSupported;
+    next.instructionsWithPreviousResponseSupported = this.instructionsWithPreviousResponseSupported;
+    return next;
   }
 
   private static isInstructionsUnsupportedError(error: unknown): boolean {
@@ -171,7 +192,7 @@ export class GrokAgent {
     }
   }
 
-  async run(input: string, state: AgentState, hooks?: AgentHooks): Promise<AgentRunResult> {
+  async run(input: string, state: AgentState, hooks?: AgentHooks, options?: AgentRunOptions): Promise<AgentRunResult> {
     const instructions = withUserSystemOverride(state.systemPromptOverride);
 
     let response: any = await this.createResponse(
@@ -185,7 +206,7 @@ export class GrokAgent {
       instructions
     );
 
-    const maxToolRounds = 12;
+    const maxToolRounds = Math.max(1, options?.maxToolRounds ?? 24);
     let rounds = 0;
 
     while (state.enableTools) {
@@ -255,13 +276,16 @@ export class GrokAgent {
             {
               type: "input_text",
               text:
-                `Break this engineering goal into 2-5 executable worker tasks.\n\n` +
+                `Break this engineering goal into 2-6 executable worker tasks.\n\n` +
                 `Goal:\n${goal}\n\n` +
                 `Output strict JSON only:\n` +
-                `{"tasks":[{"label":"short label","task":"concrete engineering instruction"}]}\n\n` +
+                `{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}\n\n` +
                 `Rules:\n` +
-                `- tasks must be independently executable by subagents\n` +
-                `- include explicit file/test scope when possible\n` +
+                `- include one setup task when needed (files/directories/bootstrap)\n` +
+                `- implementation tasks should have disjoint scope whenever possible\n` +
+                `- test/verify tasks must depend_on implementation tasks\n` +
+                `- scope should be specific paths (files or directories)\n` +
+                `- depends_on values must reference labels from this same task list\n` +
                 `- do not include markdown`
             }
           ]
@@ -275,21 +299,39 @@ export class GrokAgent {
     const parsed = extractJsonObject(text);
     const tasksRaw = Array.isArray(parsed?.tasks) ? parsed?.tasks : [];
 
-    const tasks = tasksRaw
-      .map((item) => {
-        const record = item as Record<string, unknown>;
-        const label = String(record.label ?? "").trim();
-        const task = String(record.task ?? "").trim();
-        if (!task) {
-          return undefined;
-        }
-        return {
-          label: label || "worker-task",
-          task
-        };
-      })
-      .filter((item): item is PlannedSubtask => Boolean(item))
-      .slice(0, 8);
+    const tasks = tasksRaw.reduce<PlannedSubtask[]>((acc, item) => {
+      const record = item as Record<string, unknown>;
+      const label = String(record.label ?? "").trim();
+      const task = String(record.task ?? "").trim();
+      if (!task) {
+        return acc;
+      }
+
+      const scopeRaw = Array.isArray(record.scope) ? record.scope : [];
+      const dependsRaw = Array.isArray(record.depends_on) ? record.depends_on : [];
+      const scope = scopeRaw
+        .map((part) => String(part ?? "").trim())
+        .filter(Boolean)
+        .slice(0, 8);
+      const dependsOn = dependsRaw
+        .map((part) => String(part ?? "").trim())
+        .filter(Boolean)
+        .slice(0, 8);
+
+      const planned: PlannedSubtask = {
+        label: label || "worker-task",
+        task
+      };
+      if (scope.length > 0) {
+        planned.scope = scope;
+      }
+      if (dependsOn.length > 0) {
+        planned.depends_on = dependsOn;
+      }
+
+      acc.push(planned);
+      return acc;
+    }, []).slice(0, 8);
 
     if (tasks.length > 0) {
       return tasks;
