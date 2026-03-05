@@ -537,7 +537,7 @@ export async function applyUnifiedPatch(patch: string, ctx: ToolContext, dryRun 
 
     const stripLevels = chooseStripLevels(patch);
     let selectedStrip: number | undefined;
-    let lastError = "";
+    const checkErrors: string[] = [];
     let checkResult: ProcessResult | undefined;
 
     for (const strip of stripLevels) {
@@ -555,11 +555,15 @@ export async function applyUnifiedPatch(patch: string, ctx: ToolContext, dryRun 
         break;
       }
 
-      lastError = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+      const message = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+      if (message) {
+        checkErrors.push(`-p${strip}: ${message}`);
+      }
     }
 
     if (selectedStrip === undefined) {
-      throw new Error(`patch validation failed: ${lastError || "unknown git apply error"}`);
+      const details = checkErrors.length > 0 ? checkErrors.join("\n") : "unknown git apply error";
+      throw new Error(`patch validation failed: ${details}`);
     }
 
     if (dryRun) {

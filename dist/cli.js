@@ -461,7 +461,7 @@ async function applyUnifiedPatch(patch, ctx, dryRun = false) {
     await fs.writeFile(patchFile, patch, "utf8");
     const stripLevels = chooseStripLevels(patch);
     let selectedStrip;
-    let lastError = "";
+    const checkErrors = [];
     let checkResult;
     for (const strip of stripLevels) {
       const result = await runProcess(
@@ -476,10 +476,14 @@ async function applyUnifiedPatch(patch, ctx, dryRun = false) {
         checkResult = result;
         break;
       }
-      lastError = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+      const message = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+      if (message) {
+        checkErrors.push(`-p${strip}: ${message}`);
+      }
     }
     if (selectedStrip === void 0) {
-      throw new Error(`patch validation failed: ${lastError || "unknown git apply error"}`);
+      const details = checkErrors.length > 0 ? checkErrors.join("\n") : "unknown git apply error";
+      throw new Error(`patch validation failed: ${details}`);
     }
     if (dryRun) {
       return {
@@ -1218,7 +1222,10 @@ function normalizeScopePath(input) {
   if (!value) {
     return void 0;
   }
-  const normalized = path3.normalize(value);
+  let normalized = path3.normalize(value);
+  if (normalized.length > 1) {
+    normalized = normalized.replace(/[\\/]+$/, "");
+  }
   if (!normalized || normalized === ".") {
     return void 0;
   }
@@ -1236,6 +1243,28 @@ function scopesOverlap(left, right) {
       if (a.startsWith(`${b}${path3.sep}`) || b.startsWith(`${a}${path3.sep}`)) {
         return true;
       }
+    }
+  }
+  return false;
+}
+function isPathCoveredByScopes(filePath, scopes) {
+  if (!scopes || scopes.length === 0) {
+    return true;
+  }
+  const normalizedFile = normalizeScopePath(filePath);
+  if (!normalizedFile) {
+    return false;
+  }
+  for (const scope of scopes) {
+    const normalizedScope = normalizeScopePath(scope);
+    if (!normalizedScope) {
+      continue;
+    }
+    if (normalizedFile === normalizedScope) {
+      return true;
+    }
+    if (normalizedFile.startsWith(`${normalizedScope}${path3.sep}`)) {
+      return true;
     }
   }
   return false;
@@ -1710,6 +1739,7 @@ var SubagentManager = class {
           `Worker label: ${run2.label}`,
           "You are operating inside an isolated workspace snapshot.",
           "Do not install dependencies, run package managers, or create build artifacts unless explicitly required by the task.",
+          run2.scope?.length ? `Allowed write scope: ${run2.scope.join(", ")}. Do not modify files outside this scope.` : void 0,
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ].filter(Boolean).join("\n")
@@ -1796,6 +1826,12 @@ var SubagentManager = class {
     run2.currentAction = "applying patch";
     this.emit({ type: "merge_started", run: run2 });
     try {
+      const outOfScope = (run2.patchFiles ?? []).filter((file) => !isPathCoveredByScopes(file, run2.scope));
+      if (outOfScope.length > 0) {
+        throw new Error(
+          `scope violation: worker touched files outside scope (${outOfScope.join(", ")}); declared scope: ${run2.scope?.join(", ") ?? "(none)"}`
+        );
+      }
       await applyUnifiedPatch(run2.patch ?? "", this.toolContext, false);
       run2.mergeStatus = "applied";
       run2.lastActivityAt = Date.now();

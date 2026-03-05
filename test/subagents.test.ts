@@ -156,11 +156,15 @@ test("SubagentManager enforces planned dependencies and scope locks", async () =
           }
 
           await new Promise((resolve) => setTimeout(resolve, input.includes("setup") ? 40 : 120));
-          await fs.writeFile(
-            path.join(toolContext.workspaceCwd, `${input.replace(/\s+/g, "-")}.txt`),
-            `${input}\n`,
-            "utf8"
-          );
+          if (input === "setup") {
+            await fs.writeFile(path.join(toolContext.workspaceCwd, "threejs", "boot.txt"), "setup\n", "utf8");
+          } else if (input === "impl-1") {
+            await fs.writeFile(path.join(toolContext.workspaceCwd, "threejs", "index.html"), "<html>impl1</html>\n", "utf8");
+          } else if (input === "impl-2") {
+            await fs.writeFile(path.join(toolContext.workspaceCwd, "threejs", "index.html"), "<html>impl2</html>\n", "utf8");
+          } else if (input === "verify") {
+            await fs.writeFile(path.join(toolContext.workspaceCwd, "threejs", "verify.txt"), "verify\n", "utf8");
+          }
 
           if (isImpl) {
             activeImpl -= 1;
@@ -274,4 +278,38 @@ test("SubagentManager ignores node_modules changes in worker patch generation", 
     () => fs.stat(path.join(workspace, "threejs", "node_modules", "pkg", "index.js")),
     /ENOENT/
   );
+});
+
+test("SubagentManager rejects out-of-scope worker changes during merge", async () => {
+  const workspace = await makeWorkspace();
+  await fs.writeFile(path.join(workspace, "index.html"), "<html></html>\n", "utf8");
+  await fs.writeFile(path.join(workspace, "app.js"), "console.log('base');\n", "utf8");
+
+  const fakeAgent = {
+    forkWithToolContext(toolContext: ToolContext) {
+      return {
+        async run() {
+          await fs.writeFile(path.join(toolContext.workspaceCwd, "app.js"), "console.log('ok');\n", "utf8");
+          await fs.writeFile(path.join(toolContext.workspaceCwd, "index.html"), "<html>changed</html>\n", "utf8");
+          return { text: "updated app and html", responseId: "r-scope" };
+        }
+      };
+    }
+  };
+
+  const manager = new SubagentManager({
+    agent: fakeAgent as any,
+    getBaseState: () => ({ model: "grok-code-fast-1", enableTools: true }),
+    toolContext: createToolContext(workspace),
+    maxConcurrent: 1
+  });
+
+  const run = manager.spawn({ task: "scoped-task", label: "scoped", scope: ["app.js"] });
+  await manager.waitForIdle();
+
+  const finalRun = manager.getRun(run.id);
+  assert.equal(finalRun?.status, "completed");
+  assert.equal(finalRun?.mergeStatus, "conflict");
+  assert.match(finalRun?.mergeError ?? "", /scope violation/i);
+  assert.equal(await fs.readFile(path.join(workspace, "index.html"), "utf8"), "<html></html>\n");
 });

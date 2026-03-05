@@ -161,7 +161,10 @@ function normalizeScopePath(input: string): string | undefined {
     return undefined;
   }
 
-  const normalized = path.normalize(value);
+  let normalized = path.normalize(value);
+  if (normalized.length > 1) {
+    normalized = normalized.replace(/[\\/]+$/, "");
+  }
   if (!normalized || normalized === ".") {
     return undefined;
   }
@@ -182,6 +185,34 @@ function scopesOverlap(left: string[] | undefined, right: string[] | undefined):
       if (a.startsWith(`${b}${path.sep}`) || b.startsWith(`${a}${path.sep}`)) {
         return true;
       }
+    }
+  }
+
+  return false;
+}
+
+function isPathCoveredByScopes(filePath: string, scopes: string[] | undefined): boolean {
+  if (!scopes || scopes.length === 0) {
+    return true;
+  }
+
+  const normalizedFile = normalizeScopePath(filePath);
+  if (!normalizedFile) {
+    return false;
+  }
+
+  for (const scope of scopes) {
+    const normalizedScope = normalizeScopePath(scope);
+    if (!normalizedScope) {
+      continue;
+    }
+
+    if (normalizedFile === normalizedScope) {
+      return true;
+    }
+
+    if (normalizedFile.startsWith(`${normalizedScope}${path.sep}`)) {
+      return true;
     }
   }
 
@@ -785,6 +816,9 @@ export class SubagentManager {
           `Worker label: ${run.label}`,
           "You are operating inside an isolated workspace snapshot.",
           "Do not install dependencies, run package managers, or create build artifacts unless explicitly required by the task.",
+          run.scope?.length
+            ? `Allowed write scope: ${run.scope.join(", ")}. Do not modify files outside this scope.`
+            : undefined,
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ]
@@ -889,6 +923,15 @@ export class SubagentManager {
     this.emit({ type: "merge_started", run });
 
     try {
+      const outOfScope = (run.patchFiles ?? []).filter((file) => !isPathCoveredByScopes(file, run.scope));
+      if (outOfScope.length > 0) {
+        throw new Error(
+          `scope violation: worker touched files outside scope (${outOfScope.join(", ")}); declared scope: ${
+            run.scope?.join(", ") ?? "(none)"
+          }`
+        );
+      }
+
       await applyUnifiedPatch(run.patch ?? "", this.toolContext, false);
       run.mergeStatus = "applied";
       run.lastActivityAt = Date.now();
