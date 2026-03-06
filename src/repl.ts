@@ -113,6 +113,8 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   const heartbeatFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
+  let lastProgressSignature = "";
+  const HEARTBEAT_INTERVAL_MS = 4500;
   const trackedRunIds = new Set<string>();
   let cachedAutoPlannerModel: string | undefined;
 
@@ -142,13 +144,20 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     if (pending.length === 0) {
       const progress = options.subagents.getProgressEntries();
       if (progress.length === 0) {
+        lastProgressSignature = "";
         return;
       }
 
       const now = Date.now();
-      if (now - lastHeartbeatAt < 1800) {
+      const signature = progress
+        .slice(0, 5)
+        .map((entry) => `${entry.id}:${entry.phase}:${entry.action}`)
+        .join("|");
+      const changed = signature !== lastProgressSignature;
+      if (!changed && now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) {
         return;
       }
+      lastProgressSignature = signature;
 
       heartbeatIndex = (heartbeatIndex + 1) % heartbeatFrames.length;
       lastHeartbeatAt = now;
@@ -212,6 +221,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     }
 
     trackedRunIds.clear();
+    lastProgressSignature = "";
   }, 160);
   notificationTimer.unref?.();
 
@@ -433,6 +443,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
             const deps = run.dependsOn?.length ? ` depends_on=${run.dependsOn.join(",")}` : "";
             console.log(`  - ${run.id} [${run.status}] ${run.label}${scope}${deps}`);
           }
+          console.log("Live output is summarized. Use /agents log <id> for detailed tool stream.");
         } catch (error) {
           spinner.stop();
           const message = error instanceof Error ? error.message : String(error);

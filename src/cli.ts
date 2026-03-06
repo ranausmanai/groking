@@ -42,6 +42,16 @@ async function readSystemOverride(options: CliOptions): Promise<string | undefin
   return options.system;
 }
 
+function extractCommandFromToolArgs(args: string): string | undefined {
+  try {
+    const parsed = JSON.parse(args) as Record<string, unknown>;
+    const command = typeof parsed.command === "string" ? parsed.command.trim() : "";
+    return command || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function persistSession(
   sessionPath: string,
   sessionName: string,
@@ -125,6 +135,7 @@ async function run(): Promise<void> {
 
   const oneShotPrompt = options.prompt?.trim() || promptArgs.join(" ").trim();
   const subagentNotifications: string[] = [];
+  const verboseToolStream = process.env.GROKING_VERBOSE_TOOL_STREAM === "1";
   const subagents = new SubagentManager({
     agent,
     toolContext,
@@ -172,10 +183,40 @@ async function run(): Promise<void> {
         return;
       }
       if (event.type === "tool_start") {
-        subagentNotifications.push(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
+        if (verboseToolStream) {
+          subagentNotifications.push(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
+          return;
+        }
+
+        if (event.call.name === "run_command") {
+          const command = extractCommandFromToolArgs(event.call.arguments) ?? "(command)";
+          subagentNotifications.push(`subagent:${event.run.id} cmd> ${command}`);
+        }
         return;
       }
       if (event.type === "tool_result") {
+        if (!event.result.ok) {
+          subagentNotifications.push(
+            `subagent:${event.run.id} tool-error> ${event.call.name} ${event.result.error ?? "unknown error"}`
+          );
+          return;
+        }
+
+        if (
+          event.call.name === "run_command" &&
+          typeof event.result.result === "object" &&
+          event.result.result !== null &&
+          (event.result.result as { timed_out?: unknown }).timed_out === true
+        ) {
+          const command = String((event.result.result as { command?: unknown }).command ?? "").trim();
+          subagentNotifications.push(`subagent:${event.run.id} cmd-timeout> ${command || "(command)"}`);
+          return;
+        }
+
+        if (!verboseToolStream) {
+          return;
+        }
+
         const summary = summarizeToolResult(event.result);
         subagentNotifications.push(`subagent:${event.run.id} ${formatToolResult(event.call.name, summary)}`);
       }

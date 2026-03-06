@@ -230,6 +230,13 @@ groking> /agents wait
 
 Workers can declare dependencies on other workers via the `depends_on` field. A worker won't start until its dependencies have completed and merged successfully. If a dependency fails or has a merge conflict, dependent workers are automatically blocked.
 
+### Live output and logs
+
+- Live `/agents` output is intentionally summarized to reduce console spam.
+- You will see major lifecycle events (queued, started, done, merged), status heartbeat, and command starts/timeouts.
+- For full per-tool detail, use `/agents log <id>`.
+- To force full tool streaming in console, start with `GROKING_VERBOSE_TOOL_STREAM=1`.
+
 ---
 
 ## Authentication

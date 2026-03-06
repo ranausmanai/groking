@@ -2233,6 +2233,8 @@ async function startRepl(options) {
   const heartbeatFrames = ["\u280B", "\u2819", "\u2839", "\u2838", "\u283C", "\u2834", "\u2826", "\u2827", "\u2807", "\u280F"];
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
+  let lastProgressSignature = "";
+  const HEARTBEAT_INTERVAL_MS = 4500;
   const trackedRunIds = /* @__PURE__ */ new Set();
   let cachedAutoPlannerModel;
   const pickAutoPlannerModel = async () => {
@@ -2255,12 +2257,16 @@ async function startRepl(options) {
     if (pending.length === 0) {
       const progress = options.subagents.getProgressEntries();
       if (progress.length === 0) {
+        lastProgressSignature = "";
         return;
       }
       const now = Date.now();
-      if (now - lastHeartbeatAt < 1800) {
+      const signature = progress.slice(0, 5).map((entry) => `${entry.id}:${entry.phase}:${entry.action}`).join("|");
+      const changed = signature !== lastProgressSignature;
+      if (!changed && now - lastHeartbeatAt < HEARTBEAT_INTERVAL_MS) {
         return;
       }
+      lastProgressSignature = signature;
       heartbeatIndex = (heartbeatIndex + 1) % heartbeatFrames.length;
       lastHeartbeatAt = now;
       const details = progress.slice(0, 3).map((entry) => `${entry.id} ${entry.label} [${entry.phase}] ${entry.action} (${formatElapsedShort(entry.elapsedMs)})`).join(" | ");
@@ -2311,6 +2317,7 @@ async function startRepl(options) {
       printLiveNotice(rl, promptText, `agents> open first: ${openHint}`, awaitingInput);
     }
     trackedRunIds.clear();
+    lastProgressSignature = "";
   }, 160);
   notificationTimer.unref?.();
   while (true) {
@@ -2494,6 +2501,7 @@ async function startRepl(options) {
             const deps = run2.dependsOn?.length ? ` depends_on=${run2.dependsOn.join(",")}` : "";
             console.log(`  - ${run2.id} [${run2.status}] ${run2.label}${scope}${deps}`);
           }
+          console.log("Live output is summarized. Use /agents log <id> for detailed tool stream.");
         } catch (error) {
           spinner2.stop();
           const message = error instanceof Error ? error.message : String(error);
@@ -2690,6 +2698,15 @@ async function readSystemOverride(options) {
   }
   return options.system;
 }
+function extractCommandFromToolArgs(args) {
+  try {
+    const parsed = JSON.parse(args);
+    const command = typeof parsed.command === "string" ? parsed.command.trim() : "";
+    return command || void 0;
+  } catch {
+    return void 0;
+  }
+}
 async function persistSession(sessionPath, sessionName, workspace, state, createdAt) {
   await saveSession(sessionPath, {
     name: sessionName,
@@ -2737,6 +2754,7 @@ async function run() {
   });
   const oneShotPrompt = options.prompt?.trim() || promptArgs.join(" ").trim();
   const subagentNotifications = [];
+  const verboseToolStream = process6.env.GROKING_VERBOSE_TOOL_STREAM === "1";
   const subagents = new SubagentManager({
     agent,
     toolContext,
@@ -2784,10 +2802,31 @@ async function run() {
         return;
       }
       if (event.type === "tool_start") {
-        subagentNotifications.push(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
+        if (verboseToolStream) {
+          subagentNotifications.push(`subagent:${event.run.id} ${formatToolStart(event.call.name, event.call.arguments)}`);
+          return;
+        }
+        if (event.call.name === "run_command") {
+          const command = extractCommandFromToolArgs(event.call.arguments) ?? "(command)";
+          subagentNotifications.push(`subagent:${event.run.id} cmd> ${command}`);
+        }
         return;
       }
       if (event.type === "tool_result") {
+        if (!event.result.ok) {
+          subagentNotifications.push(
+            `subagent:${event.run.id} tool-error> ${event.call.name} ${event.result.error ?? "unknown error"}`
+          );
+          return;
+        }
+        if (event.call.name === "run_command" && typeof event.result.result === "object" && event.result.result !== null && event.result.result.timed_out === true) {
+          const command = String(event.result.result.command ?? "").trim();
+          subagentNotifications.push(`subagent:${event.run.id} cmd-timeout> ${command || "(command)"}`);
+          return;
+        }
+        if (!verboseToolStream) {
+          return;
+        }
         const summary = summarizeToolResult(event.result);
         subagentNotifications.push(`subagent:${event.run.id} ${formatToolResult(event.call.name, summary)}`);
       }
