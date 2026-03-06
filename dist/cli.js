@@ -1256,19 +1256,24 @@ function describeSubagentRun(run2) {
   }
   return parts.join(" | ");
 }
-function summarizeToolCall(call) {
-  try {
-    const parsed = JSON.parse(call.arguments || "{}");
-    const interesting = ["path", "cwd", "command", "pattern"];
-    for (const key of interesting) {
-      const value = parsed[key];
-      if (typeof value === "string" && value.trim()) {
-        return `${call.name} ${value.trim()}`;
-      }
-    }
-  } catch {
+function toolActionLabel(call) {
+  switch (call.name) {
+    case "run_command":
+      return "running command";
+    case "write_file":
+    case "replace_in_file":
+    case "apply_unified_patch":
+    case "delete_file":
+      return "editing files";
+    case "read_file":
+    case "list_files":
+    case "search_files":
+    case "git_status":
+    case "get_workspace_info":
+      return "analyzing workspace";
+    default:
+      return `using ${call.name}`;
   }
-  return call.name;
 }
 function normalizeScopePath(input) {
   const value = input.trim();
@@ -1834,7 +1839,7 @@ var SubagentManager = class {
           onToolCallStart: (call) => {
             run2.logs.push(`tool> ${call.name} ${call.arguments}`);
             run2.lastActivityAt = Date.now();
-            run2.currentAction = summarizeToolCall(call);
+            run2.currentAction = toolActionLabel(call);
             this.emit({ type: "tool_start", run: run2, call });
           },
           onToolCallResult: (call, toolResult) => {
@@ -1844,7 +1849,11 @@ var SubagentManager = class {
               timedOutCommands.push(command || "(unknown command)");
             }
             run2.lastActivityAt = Date.now();
-            run2.currentAction = toolResult.ok ? `thinking after ${call.name}` : `recovering from ${call.name}`;
+            if (!toolResult.ok) {
+              run2.currentAction = `recovering from ${call.name}`;
+            } else if (call.name === "run_command") {
+              run2.currentAction = "processing command output";
+            }
             this.emit({ type: "tool_result", run: run2, call, result: toolResult });
           }
         },
@@ -2234,7 +2243,7 @@ async function startRepl(options) {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   let lastProgressSignature = "";
-  const HEARTBEAT_INTERVAL_MS = 4500;
+  const HEARTBEAT_INTERVAL_MS = 12e3;
   const trackedRunIds = /* @__PURE__ */ new Set();
   let cachedAutoPlannerModel;
   const pickAutoPlannerModel = async () => {
@@ -2269,12 +2278,15 @@ async function startRepl(options) {
       lastProgressSignature = signature;
       heartbeatIndex = (heartbeatIndex + 1) % heartbeatFrames.length;
       lastHeartbeatAt = now;
-      const details = progress.slice(0, 3).map((entry) => `${entry.id} ${entry.label} [${entry.phase}] ${entry.action} (${formatElapsedShort(entry.elapsedMs)})`).join(" | ");
-      const suffix = progress.length > 3 ? ` | +${progress.length - 3} more` : "";
+      const overview = options.subagents.getStatusOverview();
+      const focus = progress.find((entry) => entry.phase === "running") ?? progress[0];
+      const focusPart = focus ? ` | ${focus.id} ${focus.label}: ${truncateForStatus(focus.action, 56)} (${formatElapsedShort(focus.elapsedMs)})` : "";
       printLiveNotice(
         rl,
         promptText,
-        truncateForStatus(`status> ${heartbeatFrames[heartbeatIndex]} ${details}${suffix}`),
+        truncateForStatus(
+          `status> ${heartbeatFrames[heartbeatIndex]} running=${overview.running} queued=${overview.queued} pending_merge=${overview.mergePending}${focusPart}`
+        ),
         awaitingInput
       );
       return;

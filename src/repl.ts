@@ -114,7 +114,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   let lastProgressSignature = "";
-  const HEARTBEAT_INTERVAL_MS = 4500;
+  const HEARTBEAT_INTERVAL_MS = 12000;
   const trackedRunIds = new Set<string>();
   let cachedAutoPlannerModel: string | undefined;
 
@@ -161,15 +161,17 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
       heartbeatIndex = (heartbeatIndex + 1) % heartbeatFrames.length;
       lastHeartbeatAt = now;
-      const details = progress
-        .slice(0, 3)
-        .map((entry) => `${entry.id} ${entry.label} [${entry.phase}] ${entry.action} (${formatElapsedShort(entry.elapsedMs)})`)
-        .join(" | ");
-      const suffix = progress.length > 3 ? ` | +${progress.length - 3} more` : "";
+      const overview = options.subagents.getStatusOverview();
+      const focus = progress.find((entry) => entry.phase === "running") ?? progress[0];
+      const focusPart = focus
+        ? ` | ${focus.id} ${focus.label}: ${truncateForStatus(focus.action, 56)} (${formatElapsedShort(focus.elapsedMs)})`
+        : "";
       printLiveNotice(
         rl,
         promptText,
-        truncateForStatus(`status> ${heartbeatFrames[heartbeatIndex]} ${details}${suffix}`),
+        truncateForStatus(
+          `status> ${heartbeatFrames[heartbeatIndex]} running=${overview.running} queued=${overview.queued} pending_merge=${overview.mergePending}${focusPart}`
+        ),
         awaitingInput
       );
       return;

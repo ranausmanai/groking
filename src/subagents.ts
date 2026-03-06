@@ -155,6 +155,26 @@ function summarizeToolCall(call: ToolCall): string {
   return call.name;
 }
 
+function toolActionLabel(call: ToolCall): string {
+  switch (call.name) {
+    case "run_command":
+      return "running command";
+    case "write_file":
+    case "replace_in_file":
+    case "apply_unified_patch":
+    case "delete_file":
+      return "editing files";
+    case "read_file":
+    case "list_files":
+    case "search_files":
+    case "git_status":
+    case "get_workspace_info":
+      return "analyzing workspace";
+    default:
+      return `using ${call.name}`;
+  }
+}
+
 function normalizeScopePath(input: string): string | undefined {
   const value = input.trim();
   if (!value) {
@@ -871,7 +891,7 @@ export class SubagentManager {
           onToolCallStart: (call) => {
             run.logs.push(`tool> ${call.name} ${call.arguments}`);
             run.lastActivityAt = Date.now();
-            run.currentAction = summarizeToolCall(call);
+            run.currentAction = toolActionLabel(call);
             this.emit({ type: "tool_start", run, call });
           },
           onToolCallResult: (call, toolResult) => {
@@ -887,7 +907,11 @@ export class SubagentManager {
               timedOutCommands.push(command || "(unknown command)");
             }
             run.lastActivityAt = Date.now();
-            run.currentAction = toolResult.ok ? `thinking after ${call.name}` : `recovering from ${call.name}`;
+            if (!toolResult.ok) {
+              run.currentAction = `recovering from ${call.name}`;
+            } else if (call.name === "run_command") {
+              run.currentAction = "processing command output";
+            }
             this.emit({ type: "tool_result", run, call, result: toolResult });
           }
         },
