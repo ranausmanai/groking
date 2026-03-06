@@ -343,3 +343,47 @@ test("SubagentManager fails write-intent file-scoped task when no patch is produ
   assert.match(finalRun?.error ?? "", /require file edits/i);
   assert.equal(await fs.readFile(path.join(workspace, "index.html"), "utf8"), "<html></html>\n");
 });
+
+test("SubagentManager fails verification task when run_command times out", async () => {
+  const workspace = await makeWorkspace();
+  await fs.writeFile(path.join(workspace, "index.html"), "<html></html>\n", "utf8");
+
+  const fakeAgent = {
+    forkWithToolContext() {
+      return {
+        async run(_input: string, _state: AgentState, hooks?: any) {
+          hooks?.onToolCallResult?.(
+            { name: "run_command", arguments: "{\"command\":\"python app.py\"}", callId: "call-1" },
+            {
+              ok: true,
+              result: {
+                command: "python app.py",
+                cwd: ".",
+                exit_code: null,
+                timed_out: true,
+                duration_ms: 30000,
+                stdout: "",
+                stderr: ""
+              }
+            }
+          );
+          return { text: "verification complete", responseId: "r-timeout" };
+        }
+      };
+    }
+  };
+
+  const manager = new SubagentManager({
+    agent: fakeAgent as any,
+    getBaseState: () => ({ model: "grok-code-fast-1", enableTools: true }),
+    toolContext: createToolContext(workspace),
+    maxConcurrent: 1
+  });
+
+  const run = manager.spawn({ task: "verify the output", label: "verify-step", scope: ["index.html"] });
+  await manager.waitForIdle();
+
+  const finalRun = manager.getRun(run.id);
+  assert.equal(finalRun?.status, "failed");
+  assert.match(finalRun?.error ?? "", /verification command timed out/i);
+});

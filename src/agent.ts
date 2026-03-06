@@ -347,11 +347,14 @@ export class GrokAgent {
       `Output strict JSON only:\n` +
       `{"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}\n\n` +
       `Rules:\n` +
+      `- prefer the minimum useful number of tasks (often 1-3 for simple goals)\n` +
       `- include one setup task when needed (files/directories/bootstrap)\n` +
+      `- do not add a separate test/verify task unless validation is explicitly requested or clearly necessary\n` +
       `- implementation tasks should have disjoint scope whenever possible\n` +
       `- test/verify tasks must depend_on implementation tasks\n` +
       `- scope should be specific paths (files or directories)\n` +
       `- depends_on values must reference labels from this same task list\n` +
+      `- for visual/creative tasks (UI, animation, demos), require polished output and concrete run instructions in task wording\n` +
       `- do not include markdown`;
     const response: any = await this.createResponse(
       {

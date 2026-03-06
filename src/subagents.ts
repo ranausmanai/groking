@@ -246,6 +246,10 @@ function runLikelyRequiresFileChanges(run: SubagentRunRecord): boolean {
   return /\b(write|create|update|edit|modify|refactor|implement|add|remove|rename|patch)\b/i.test(run.task);
 }
 
+function isVerificationTask(run: SubagentRunRecord): boolean {
+  return /\b(verify|verification|test|validate|check|qa)\b/i.test(`${run.label} ${run.task}`);
+}
+
 interface ProcessResult {
   exitCode: number | null;
   timedOut: boolean;
@@ -824,12 +828,17 @@ export class SubagentManager {
 
     const base = this.getBaseState();
     let snapshot: WorkerSnapshot | undefined;
+    const verificationTask = isVerificationTask(run);
+    const timedOutCommands: string[] = [];
 
     try {
       snapshot = await prepareWorkerSnapshot(this.toolContext.workspaceCwd);
       const workerToolContext: ToolContext = {
         ...this.toolContext,
-        workspaceCwd: snapshot.workerDir
+        workspaceCwd: snapshot.workerDir,
+        defaultCommandTimeoutMs: verificationTask
+          ? Math.min(this.toolContext.defaultCommandTimeoutMs, 30_000)
+          : this.toolContext.defaultCommandTimeoutMs
       };
 
       const workerAgent = this.agent.forkWithToolContext(workerToolContext);
@@ -847,6 +856,7 @@ export class SubagentManager {
             ? `Allowed write scope: ${run.scope.join(", ")}. Do not modify files outside this scope.`
             : undefined,
           "If the task requests creating or editing files, you must actually make those file changes before finishing.",
+          "Avoid long-running interactive commands. Do not run infinite loops, watch mode, or persistent servers while validating work.",
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ]
@@ -866,6 +876,16 @@ export class SubagentManager {
           },
           onToolCallResult: (call, toolResult) => {
             run.logs.push(`tool< ${call.name} ${summarizeToolResult(toolResult)}`);
+            if (
+              call.name === "run_command" &&
+              toolResult.ok &&
+              typeof toolResult.result === "object" &&
+              toolResult.result !== null &&
+              (toolResult.result as { timed_out?: unknown }).timed_out === true
+            ) {
+              const command = String((toolResult.result as { command?: unknown }).command ?? "").trim();
+              timedOutCommands.push(command || "(unknown command)");
+            }
             run.lastActivityAt = Date.now();
             run.currentAction = toolResult.ok ? `thinking after ${call.name}` : `recovering from ${call.name}`;
             this.emit({ type: "tool_result", run, call, result: toolResult });
@@ -873,6 +893,10 @@ export class SubagentManager {
         },
         { maxToolRounds: 40 }
       );
+
+      if (verificationTask && timedOutCommands.length > 0) {
+        throw new Error(`verification command timed out: ${timedOutCommands[0]}`);
+      }
 
       run.status = "completed";
       run.endedAt = Date.now();

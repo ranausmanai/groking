@@ -912,11 +912,14 @@ Output strict JSON only:
 {"tasks":[{"label":"short label","task":"concrete engineering instruction","scope":["path/or/file"],"depends_on":["other label"]}]}
 
 Rules:
+- prefer the minimum useful number of tasks (often 1-3 for simple goals)
 - include one setup task when needed (files/directories/bootstrap)
+- do not add a separate test/verify task unless validation is explicitly requested or clearly necessary
 - implementation tasks should have disjoint scope whenever possible
 - test/verify tasks must depend_on implementation tasks
 - scope should be specific paths (files or directories)
 - depends_on values must reference labels from this same task list
+- for visual/creative tasks (UI, animation, demos), require polished output and concrete run instructions in task wording
 - do not include markdown`;
     const response = await this.createResponse(
       {
@@ -1340,6 +1343,9 @@ function runLikelyRequiresFileChanges(run2) {
     return false;
   }
   return /\b(write|create|update|edit|modify|refactor|implement|add|remove|rename|patch)\b/i.test(run2.task);
+}
+function isVerificationTask(run2) {
+  return /\b(verify|verification|test|validate|check|qa)\b/i.test(`${run2.label} ${run2.task}`);
 }
 var SNAPSHOT_EXCLUDES = /* @__PURE__ */ new Set([
   ".git",
@@ -1794,11 +1800,14 @@ var SubagentManager = class {
     this.emit({ type: "started", run: run2 });
     const base = this.getBaseState();
     let snapshot;
+    const verificationTask = isVerificationTask(run2);
+    const timedOutCommands = [];
     try {
       snapshot = await prepareWorkerSnapshot(this.toolContext.workspaceCwd);
       const workerToolContext = {
         ...this.toolContext,
-        workspaceCwd: snapshot.workerDir
+        workspaceCwd: snapshot.workerDir,
+        defaultCommandTimeoutMs: verificationTask ? Math.min(this.toolContext.defaultCommandTimeoutMs, 3e4) : this.toolContext.defaultCommandTimeoutMs
       };
       const workerAgent = this.agent.forkWithToolContext(workerToolContext);
       const workerState = {
@@ -1813,6 +1822,7 @@ var SubagentManager = class {
           "Do not install dependencies, run package managers, or create build artifacts unless explicitly required by the task.",
           run2.scope?.length ? `Allowed write scope: ${run2.scope.join(", ")}. Do not modify files outside this scope.` : void 0,
           "If the task requests creating or editing files, you must actually make those file changes before finishing.",
+          "Avoid long-running interactive commands. Do not run infinite loops, watch mode, or persistent servers while validating work.",
           "Make file changes only for the assigned task and keep the scope tight.",
           "Return a concise summary of what changed and what remains."
         ].filter(Boolean).join("\n")
@@ -1829,6 +1839,10 @@ var SubagentManager = class {
           },
           onToolCallResult: (call, toolResult) => {
             run2.logs.push(`tool< ${call.name} ${summarizeToolResult(toolResult)}`);
+            if (call.name === "run_command" && toolResult.ok && typeof toolResult.result === "object" && toolResult.result !== null && toolResult.result.timed_out === true) {
+              const command = String(toolResult.result.command ?? "").trim();
+              timedOutCommands.push(command || "(unknown command)");
+            }
             run2.lastActivityAt = Date.now();
             run2.currentAction = toolResult.ok ? `thinking after ${call.name}` : `recovering from ${call.name}`;
             this.emit({ type: "tool_result", run: run2, call, result: toolResult });
@@ -1836,6 +1850,9 @@ var SubagentManager = class {
         },
         { maxToolRounds: 40 }
       );
+      if (verificationTask && timedOutCommands.length > 0) {
+        throw new Error(`verification command timed out: ${timedOutCommands[0]}`);
+      }
       run2.status = "completed";
       run2.endedAt = Date.now();
       run2.output = result.text;
