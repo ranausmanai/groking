@@ -40,14 +40,11 @@ Most AI coding tools run in the cloud or inside an IDE. **Groking** runs where y
 ## Quick Start
 
 ```bash
-# Clone and build
-git clone https://github.com/ranausmanai/groking.git
-cd groking
-npm install
-npm run build
+# Install globally (recommended)
+npm i -g groking-cli
 
-# Run
-node dist/cli.js
+# Run in your project
+groking --cwd .
 ```
 
 On first run, Groking will prompt for your `XAI_API_KEY` and save it to `~/.groking/config.json` for future sessions.
@@ -55,14 +52,17 @@ On first run, Groking will prompt for your `XAI_API_KEY` and save it to `~/.grok
 ```bash
 # Or set the key via environment
 export XAI_API_KEY="xai-..."
-node dist/cli.js
+groking --cwd .
 ```
 
-### Install globally (after publishing)
+### Run from source (development)
 
 ```bash
-npm i -g groking-cli
-groking
+git clone https://github.com/ranausmanai/groking.git
+cd groking
+npm install
+npm run build
+node dist/cli.js --cwd .
 ```
 
 ---
