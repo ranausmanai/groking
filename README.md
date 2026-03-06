@@ -190,6 +190,15 @@ Groking's most powerful feature is its **planner → parallel workers → merge*
 3. **Execute** — Up to 4 workers run in parallel (with scope-aware contention prevention)
 4. **Merge** — Completed workers produce unified diff patches that are merged back in spawn order
 
+### When to use `/agents run` vs normal prompt
+
+Use the right mode for the job:
+
+- Use **normal prompt** for single-file or creative output (for example: one HTML demo, one animation page, one script).
+- Use **`/agents run`** for larger engineering goals with multiple moving parts (for example: refactor + tests + migration + verification).
+
+Why: `/agents run` optimizes for decomposition, scope safety, dependency ordering, and merge reliability. For simple creative tasks, direct mode is often faster and more coherent.
+
 ### Example
 
 ```
