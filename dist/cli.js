@@ -2244,6 +2244,56 @@ function printLiveNotice(rl, prompt, message, awaitingInput) {
   process5.stdout.write(line);
   nodeReadline.cursorTo(process5.stdout, visiblePromptLength + cursor);
 }
+function renderInPlaceStatus(rl, prompt, message, awaitingInput, state) {
+  if (!awaitingInput || !process5.stdout.isTTY) {
+    console.log(message);
+    state.active = false;
+    return;
+  }
+  const line = typeof rl.line === "string" ? rl.line : "";
+  const cursor = typeof rl.cursor === "number" ? rl.cursor : line.length;
+  const visiblePromptLength = stripAnsi(prompt).length;
+  if (!state.active) {
+    nodeReadline.clearLine(process5.stdout, 0);
+    nodeReadline.cursorTo(process5.stdout, 0);
+    process5.stdout.write(`${message}
+`);
+    process5.stdout.write(prompt);
+    process5.stdout.write(line);
+    nodeReadline.cursorTo(process5.stdout, visiblePromptLength + cursor);
+    state.active = true;
+    return;
+  }
+  nodeReadline.moveCursor(process5.stdout, 0, -1);
+  nodeReadline.clearLine(process5.stdout, 0);
+  nodeReadline.cursorTo(process5.stdout, 0);
+  process5.stdout.write(message);
+  nodeReadline.moveCursor(process5.stdout, 0, 1);
+  nodeReadline.clearLine(process5.stdout, 0);
+  nodeReadline.cursorTo(process5.stdout, 0);
+  process5.stdout.write(prompt);
+  process5.stdout.write(line);
+  nodeReadline.cursorTo(process5.stdout, visiblePromptLength + cursor);
+}
+function clearInPlaceStatus(rl, prompt, awaitingInput, state) {
+  if (!state.active || !awaitingInput || !process5.stdout.isTTY) {
+    state.active = false;
+    return;
+  }
+  const line = typeof rl.line === "string" ? rl.line : "";
+  const cursor = typeof rl.cursor === "number" ? rl.cursor : line.length;
+  const visiblePromptLength = stripAnsi(prompt).length;
+  nodeReadline.moveCursor(process5.stdout, 0, -1);
+  nodeReadline.clearLine(process5.stdout, 0);
+  nodeReadline.cursorTo(process5.stdout, 0);
+  nodeReadline.moveCursor(process5.stdout, 0, 1);
+  nodeReadline.clearLine(process5.stdout, 0);
+  nodeReadline.cursorTo(process5.stdout, 0);
+  process5.stdout.write(prompt);
+  process5.stdout.write(line);
+  nodeReadline.cursorTo(process5.stdout, visiblePromptLength + cursor);
+  state.active = false;
+}
 async function startRepl(options) {
   const rl = readline3.createInterface({
     input: process5.stdin,
@@ -2259,6 +2309,7 @@ async function startRepl(options) {
   let lastProgressSignature = "";
   const HEARTBEAT_INTERVAL_MS = 2500;
   const trackedRunIds = /* @__PURE__ */ new Set();
+  const statusRenderState = { active: false };
   let cachedAutoPlannerModel;
   const pickAutoPlannerModel = async () => {
     if (cachedAutoPlannerModel) {
@@ -2281,6 +2332,7 @@ async function startRepl(options) {
       const progress = options.subagents.getProgressEntries();
       if (progress.length === 0) {
         lastProgressSignature = "";
+        clearInPlaceStatus(rl, promptText, awaitingInput, statusRenderState);
         return;
       }
       const now = Date.now();
@@ -2295,16 +2347,18 @@ async function startRepl(options) {
       const overview = options.subagents.getStatusOverview();
       const focus = progress.find((entry) => entry.phase === "running") ?? progress[0];
       const focusPart = focus ? ` | ${focus.id} ${focus.label}: ${truncateForStatus(focus.action, 56)} (${formatElapsedShort(focus.elapsedMs)})` : "";
-      printLiveNotice(
+      renderInPlaceStatus(
         rl,
         promptText,
         truncateForStatus(
           `status> ${heartbeatFrames[heartbeatIndex]} running=${overview.running} queued=${overview.queued} pending_merge=${overview.mergePending}${focusPart}`
         ),
-        awaitingInput
+        awaitingInput,
+        statusRenderState
       );
       return;
     }
+    clearInPlaceStatus(rl, promptText, awaitingInput, statusRenderState);
     for (const note of pending) {
       lastHeartbeatAt = Date.now();
       printLiveNotice(rl, promptText, note, awaitingInput);
@@ -2350,6 +2404,7 @@ async function startRepl(options) {
     awaitingInput = true;
     const raw = await rl.question(promptText);
     awaitingInput = false;
+    clearInPlaceStatus(rl, promptText, true, statusRenderState);
     const input = raw.trim();
     if (!input) {
       continue;
