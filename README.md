@@ -110,7 +110,7 @@ groking [prompt...] [options]
 | Option | Default | Description |
 |---|---|---|
 | `-m, --model <model>` | `grok-code-fast-1` | Grok model to use |
-| `--planner-model <model>` | same as `--model` | Dedicated model for `/agents run` planning |
+| `--planner-model <model>` | auto-select | Dedicated model for `/agents run` planning |
 | `--base-url <url>` | `https://api.x.ai/v1` | xAI API base URL |
 | `--session <name>` | workspace hash | Named session for conversation continuity |
 | `--system <text>` | — | Additional system prompt |
@@ -139,6 +139,7 @@ Once in the interactive REPL, use these commands:
 | `/model <name>` | Switch to a different model |
 | `/planner` | Show current planner model |
 | `/planner <name>` | Switch planner model used by `/agents run` |
+| `/planner auto` | Reset planner selection to auto-pick mode |
 | `/models` | List all available models from the API |
 | `/tools on\|off` | Enable or disable local tool access |
 

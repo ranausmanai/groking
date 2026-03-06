@@ -103,7 +103,7 @@ async function run(): Promise<void> {
 
   const state: AgentState = {
     model: options.model,
-    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim() || options.model,
+    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim(),
     previousResponseId: existingSession?.workspace === workspace ? existingSession.previousResponseId : undefined,
     systemPromptOverride: await readSystemOverride(options),
     enableTools: options.tools
@@ -222,7 +222,7 @@ async function run(): Promise<void> {
 
   console.log(`Workspace: ${workspace}`);
   console.log(`Model: ${state.model}`);
-  console.log(`Planner model: ${state.plannerModel ?? state.model}`);
+  console.log(`Planner model: ${state.plannerModel ?? "auto"}`);
   console.log(`Session file: ${sessionPath}`);
   if (state.previousResponseId) {
     console.log("Loaded existing session context.");

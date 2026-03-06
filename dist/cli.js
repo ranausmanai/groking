@@ -2139,6 +2139,7 @@ function printHelp() {
   console.log("  /model <name>      Change model for next turns");
   console.log("  /planner           Show current planner model");
   console.log("  /planner <name>    Change planner model used by /agents run");
+  console.log("  /planner auto      Let CLI auto-pick planner model");
   console.log("  /models            List available models from API");
   console.log("  /agents help       Show subagent commands");
   console.log("  /agents run <goal> Planner splits goal and spawns workers");
@@ -2216,6 +2217,22 @@ async function startRepl(options) {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   const trackedRunIds = /* @__PURE__ */ new Set();
+  let cachedAutoPlannerModel;
+  const pickAutoPlannerModel = async () => {
+    if (cachedAutoPlannerModel) {
+      return cachedAutoPlannerModel;
+    }
+    try {
+      const models = await options.agent.listModels();
+      const codingModel = options.state.model;
+      const preferred = models.map((item) => item.id).filter((id) => id !== codingModel).find((id) => /reason|think|deep|grok-4/i.test(id));
+      cachedAutoPlannerModel = preferred ?? codingModel;
+      return cachedAutoPlannerModel;
+    } catch {
+      cachedAutoPlannerModel = options.state.model;
+      return cachedAutoPlannerModel;
+    }
+  };
   const notificationTimer = setInterval(() => {
     const pending = options.pullNotifications?.() ?? [];
     if (pending.length === 0) {
@@ -2316,17 +2333,27 @@ async function startRepl(options) {
       continue;
     }
     if (input === "/planner") {
-      console.log(`Current planner model: ${options.state.plannerModel ?? options.state.model}`);
+      if (options.state.plannerModel) {
+        console.log(`Current planner model: ${options.state.plannerModel}`);
+      } else {
+        const resolved = await pickAutoPlannerModel();
+        console.log(`Current planner model: auto (${resolved})`);
+      }
       console.log("Usage: /planner <name>");
       continue;
     }
     if (input.startsWith("/planner ")) {
       const model = input.replace("/planner", "").trim();
       if (!model) {
-        console.log("Usage: /planner <name>");
+        console.log("Usage: /planner <name|auto>");
       } else {
-        options.state.plannerModel = model;
-        console.log(`Planner model set to ${model}`);
+        if (model.toLowerCase() === "auto") {
+          options.state.plannerModel = void 0;
+          console.log("Planner model set to auto");
+        } else {
+          options.state.plannerModel = model;
+          console.log(`Planner model set to ${model}`);
+        }
       }
       continue;
     }
@@ -2435,8 +2462,9 @@ async function startRepl(options) {
         }
         const spinner2 = new Spinner();
         try {
-          const plannerModel = options.state.plannerModel ?? options.state.model;
-          spinner2.start(`Planning worker tasks with ${plannerModel}...`);
+          spinner2.start("Planning worker tasks...");
+          const plannerModel = options.state.plannerModel ?? await pickAutoPlannerModel();
+          spinner2.setText(`Planning worker tasks with ${plannerModel}...`);
           const plan = await options.agent.planSubtasks(goal, options.state, plannerModel);
           spinner2.stop();
           const runs = options.subagents.spawnPlanned(plan);
@@ -2673,7 +2701,7 @@ async function run() {
   const createdAt = existingSession?.createdAt ?? (/* @__PURE__ */ new Date()).toISOString();
   const state = {
     model: options.model,
-    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim() || options.model,
+    plannerModel: options.plannerModel?.trim() || existingSession?.plannerModel?.trim(),
     previousResponseId: existingSession?.workspace === workspace ? existingSession.previousResponseId : void 0,
     systemPromptOverride: await readSystemOverride(options),
     enableTools: options.tools
@@ -2783,7 +2811,7 @@ async function run() {
   }
   console.log(`Workspace: ${workspace}`);
   console.log(`Model: ${state.model}`);
-  console.log(`Planner model: ${state.plannerModel ?? state.model}`);
+  console.log(`Planner model: ${state.plannerModel ?? "auto"}`);
   console.log(`Session file: ${sessionPath}`);
   if (state.previousResponseId) {
     console.log("Loaded existing session context.");

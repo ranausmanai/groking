@@ -24,6 +24,7 @@ function printHelp(): void {
   console.log("  /model <name>      Change model for next turns");
   console.log("  /planner           Show current planner model");
   console.log("  /planner <name>    Change planner model used by /agents run");
+  console.log("  /planner auto      Let CLI auto-pick planner model");
   console.log("  /models            List available models from API");
   console.log("  /agents help       Show subagent commands");
   console.log("  /agents run <goal> Planner splits goal and spawns workers");
@@ -113,6 +114,28 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   const trackedRunIds = new Set<string>();
+  let cachedAutoPlannerModel: string | undefined;
+
+  const pickAutoPlannerModel = async (): Promise<string> => {
+    if (cachedAutoPlannerModel) {
+      return cachedAutoPlannerModel;
+    }
+
+    try {
+      const models = await options.agent.listModels();
+      const codingModel = options.state.model;
+      const preferred = models
+        .map((item) => item.id)
+        .filter((id) => id !== codingModel)
+        .find((id) => /reason|think|deep|grok-4/i.test(id));
+
+      cachedAutoPlannerModel = preferred ?? codingModel;
+      return cachedAutoPlannerModel;
+    } catch {
+      cachedAutoPlannerModel = options.state.model;
+      return cachedAutoPlannerModel;
+    }
+  };
 
   const notificationTimer = setInterval(() => {
     const pending = options.pullNotifications?.() ?? [];
@@ -236,7 +259,12 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     }
 
     if (input === "/planner") {
-      console.log(`Current planner model: ${options.state.plannerModel ?? options.state.model}`);
+      if (options.state.plannerModel) {
+        console.log(`Current planner model: ${options.state.plannerModel}`);
+      } else {
+        const resolved = await pickAutoPlannerModel();
+        console.log(`Current planner model: auto (${resolved})`);
+      }
       console.log("Usage: /planner <name>");
       continue;
     }
@@ -244,10 +272,15 @@ export async function startRepl(options: ReplOptions): Promise<void> {
     if (input.startsWith("/planner ")) {
       const model = input.replace("/planner", "").trim();
       if (!model) {
-        console.log("Usage: /planner <name>");
+        console.log("Usage: /planner <name|auto>");
       } else {
-        options.state.plannerModel = model;
-        console.log(`Planner model set to ${model}`);
+        if (model.toLowerCase() === "auto") {
+          options.state.plannerModel = undefined;
+          console.log("Planner model set to auto");
+        } else {
+          options.state.plannerModel = model;
+          console.log(`Planner model set to ${model}`);
+        }
       }
       continue;
     }
@@ -384,8 +417,9 @@ export async function startRepl(options: ReplOptions): Promise<void> {
 
         const spinner = new Spinner();
         try {
-          const plannerModel = options.state.plannerModel ?? options.state.model;
-          spinner.start(`Planning worker tasks with ${plannerModel}...`);
+          spinner.start("Planning worker tasks...");
+          const plannerModel = options.state.plannerModel ?? await pickAutoPlannerModel();
+          spinner.setText(`Planning worker tasks with ${plannerModel}...`);
           const plan = await options.agent.planSubtasks(goal, options.state, plannerModel);
           spinner.stop();
 
