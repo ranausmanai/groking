@@ -155,21 +155,38 @@ function summarizeToolCall(call: ToolCall): string {
   return call.name;
 }
 
+function parseToolArguments(args: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(args);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function shorten(text: string, maxChars = 56): string {
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}…`;
+}
+
 function toolActionLabel(call: ToolCall): string {
+  const args = parseToolArguments(call.arguments);
+  const pathArg = typeof args.path === "string" ? args.path.trim() : "";
+  const commandArg = typeof args.command === "string" ? args.command.trim() : "";
+
   switch (call.name) {
     case "run_command":
-      return "running command";
+      return commandArg ? `running: ${shorten(commandArg)}` : "running command";
     case "write_file":
     case "replace_in_file":
     case "apply_unified_patch":
     case "delete_file":
-      return "editing files";
+      return pathArg ? `editing: ${shorten(pathArg)}` : "editing files";
     case "read_file":
     case "list_files":
     case "search_files":
     case "git_status":
     case "get_workspace_info":
-      return "analyzing workspace";
+      return pathArg ? `analyzing: ${shorten(pathArg)}` : "analyzing workspace";
     default:
       return `using ${call.name}`;
   }

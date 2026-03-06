@@ -114,7 +114,7 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   let lastProgressSignature = "";
-  const HEARTBEAT_INTERVAL_MS = 12000;
+  const HEARTBEAT_INTERVAL_MS = 2500;
   const trackedRunIds = new Set<string>();
   let cachedAutoPlannerModel: string | undefined;
 

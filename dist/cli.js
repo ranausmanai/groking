@@ -1256,21 +1256,35 @@ function describeSubagentRun(run2) {
   }
   return parts.join(" | ");
 }
+function parseToolArguments(args) {
+  try {
+    const parsed = JSON.parse(args);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function shorten(text, maxChars = 56) {
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars - 1)}\u2026`;
+}
 function toolActionLabel(call) {
+  const args = parseToolArguments(call.arguments);
+  const pathArg = typeof args.path === "string" ? args.path.trim() : "";
+  const commandArg = typeof args.command === "string" ? args.command.trim() : "";
   switch (call.name) {
     case "run_command":
-      return "running command";
+      return commandArg ? `running: ${shorten(commandArg)}` : "running command";
     case "write_file":
     case "replace_in_file":
     case "apply_unified_patch":
     case "delete_file":
-      return "editing files";
+      return pathArg ? `editing: ${shorten(pathArg)}` : "editing files";
     case "read_file":
     case "list_files":
     case "search_files":
     case "git_status":
     case "get_workspace_info":
-      return "analyzing workspace";
+      return pathArg ? `analyzing: ${shorten(pathArg)}` : "analyzing workspace";
     default:
       return `using ${call.name}`;
   }
@@ -2243,7 +2257,7 @@ async function startRepl(options) {
   let heartbeatIndex = 0;
   let lastHeartbeatAt = 0;
   let lastProgressSignature = "";
-  const HEARTBEAT_INTERVAL_MS = 12e3;
+  const HEARTBEAT_INTERVAL_MS = 2500;
   const trackedRunIds = /* @__PURE__ */ new Set();
   let cachedAutoPlannerModel;
   const pickAutoPlannerModel = async () => {
